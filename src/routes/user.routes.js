@@ -1,0 +1,21 @@
+import { Router } from "express";
+import * as ctrl from "../controllers/user.controller.js";
+import { authJWT } from "../middlewares/auth.middleware.js";
+import { isAdmin } from "../middlewares/isAdmin.middleware.js";
+
+const router = Router();
+router.get("/profile", authJWT, ctrl.getProfile);
+router.put("/profile", authJWT, ctrl.updateProfile);
+router.put("/change-password", authJWT, ctrl.changePassword);
+router.get("/addresses", authJWT, ctrl.getAddresses);
+router.post("/addresses", authJWT, ctrl.addAddress);
+router.put("/addresses/:id", authJWT, ctrl.updateAddress);
+router.delete("/addresses/:id", authJWT, ctrl.deleteAddress);
+router.patch("/addresses/:id/default", authJWT, ctrl.setDefaultAddress);
+router.get("/notifications", authJWT, ctrl.getNotifications);
+router.patch("/notifications/:id/read", authJWT, ctrl.markAsRead);
+router.get("/", authJWT, isAdmin, ctrl.getAll);
+router.get("/:id", authJWT, isAdmin, ctrl.getOne);
+router.patch("/:id/status", authJWT, isAdmin, ctrl.changeStatus);
+router.patch("/:id/role", authJWT, isAdmin, ctrl.changeRole);
+export default router;
