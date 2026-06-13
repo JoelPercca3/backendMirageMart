@@ -2,11 +2,17 @@ import app from "./app.js";
 import { testConnection } from "./config/database.js";
 import { PORT } from "./config/env.js";
 
+// ✅ Importar rutas de variantes
+import variantRoutes from "./routes/variant.routes.js";
+
 const start = async () => {
   // 1. Verificar conexión a MySQL
   await testConnection();
 
-  // 2. Levantar servidor HTTP
+  // ✅ 2. Registrar rutas de variantes ANTES de levantar el servidor
+  app.use("/api/v1/admin/variants", variantRoutes);
+
+  // 3. Levantar servidor HTTP
   const server = app.listen(PORT, () => {
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log(`🚀  Servidor:   http://localhost:${PORT}`);
@@ -16,7 +22,7 @@ const start = async () => {
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
   });
 
-  // 3. Graceful shutdown
+  // 4. Graceful shutdown
   const shutdown = (signal) => {
     console.log(`\n⚠️  ${signal} recibido — cerrando servidor...`);
     server.close(() => {

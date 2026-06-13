@@ -6,19 +6,33 @@ const storage = new CloudinaryStorage({
   cloudinary,
   params: {
     folder: "miragemart/products",
-    allowed_formats: ["jpg", "jpeg", "png", "webp", "gif"],
+    allowed_formats: ["jpg", "jpeg", "png", "webp", "gif", "avif"],
     transformation: [
-      { width: 800, height: 800, crop: "limit", quality: "auto" },
+      {
+        width: 1200, // ← CAMBIADO: 800 → 1200
+        height: 1200, // ← CAMBIADO: 800 → 1200
+        crop: "limit", // Mantiene proporción
+        quality: "auto", // Cloudinary optimiza automáticamente
+        fetch_format: "auto", // ← NUEVO: formato óptimo (WebP si el browser lo soporta)
+      },
     ],
   },
 });
 
 const fileFilter = (_req, file, cb) => {
-  const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+  const allowed = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/avif",
+  ];
   allowed.includes(file.mimetype)
     ? cb(null, true)
     : cb(
-        new Error("Tipo de archivo no permitido. Solo JPG, PNG, WEBP y GIF."),
+        new Error(
+          "Tipo de archivo no permitido. Solo JPG, PNG, WEBP, GIF y AVIF.",
+        ),
         false,
       );
 };
@@ -26,5 +40,5 @@ const fileFilter = (_req, file, cb) => {
 export const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // ← CAMBIADO: 5MB → 10MB (para imágenes más grandes)
 });

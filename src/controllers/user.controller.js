@@ -62,25 +62,35 @@ export const addAddress = async (req, res, next) => {
       referencia,
       ciudad,
       departamento,
+      provincia, // ← NUEVO
+      distrito, // ← NUEVO
       codigo_postal,
       pais,
       telefono_contacto,
       es_predeterminada,
     } = req.body;
+
     if (es_predeterminada)
       await pool.query(
         "UPDATE addresses SET es_predeterminada = 0 WHERE user_id = ?",
         [req.user.id],
       );
+
     const [result] = await pool.query(
-      "INSERT INTO addresses (user_id, nombre_destinatario, calle, referencia, ciudad, departamento, codigo_postal, pais, telefono_contacto, es_predeterminada) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      `INSERT INTO addresses 
+       (user_id, nombre_destinatario, calle, referencia, ciudad, 
+        departamento, provincia, distrito, codigo_postal, pais, 
+        telefono_contacto, es_predeterminada) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         req.user.id,
         nombre_destinatario,
         calle,
         referencia || null,
-        ciudad,
-        departamento,
+        ciudad || null,
+        departamento || null,
+        provincia || null, // ← NUEVO
+        distrito || null, // ← NUEVO
         codigo_postal || null,
         pais || "Perú",
         telefono_contacto || null,
@@ -100,21 +110,48 @@ export const updateAddress = async (req, res, next) => {
       referencia,
       ciudad,
       departamento,
+      provincia, // ← NUEVO
+      distrito, // ← NUEVO
       codigo_postal,
       pais,
       telefono_contacto,
+      es_predeterminada,
     } = req.body;
+
+    // Si se marca como predeterminada, quitar de otras
+    if (es_predeterminada) {
+      await pool.query(
+        "UPDATE addresses SET es_predeterminada = 0 WHERE user_id = ?",
+        [req.user.id],
+      );
+    }
+
     await pool.query(
-      "UPDATE addresses SET nombre_destinatario=?,calle=?,referencia=?,ciudad=?,departamento=?,codigo_postal=?,pais=?,telefono_contacto=? WHERE id=? AND user_id=?",
+      `UPDATE addresses SET 
+        nombre_destinatario = ?, 
+        calle = ?, 
+        referencia = ?, 
+        ciudad = ?, 
+        departamento = ?, 
+        provincia = ?, 
+        distrito = ?, 
+        codigo_postal = ?, 
+        pais = ?, 
+        telefono_contacto = ?,
+        es_predeterminada = ?
+       WHERE id = ? AND user_id = ?`,
       [
         nombre_destinatario,
         calle,
         referencia || null,
-        ciudad,
-        departamento,
+        ciudad || null,
+        departamento || null,
+        provincia || null, // ← NUEVO
+        distrito || null, // ← NUEVO
         codigo_postal || null,
         pais || "Perú",
         telefono_contacto || null,
+        es_predeterminada ? 1 : 0,
         req.params.id,
         req.user.id,
       ],

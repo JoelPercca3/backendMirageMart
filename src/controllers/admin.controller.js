@@ -137,6 +137,23 @@ export const deleteCoupon = async (req, res, next) => {
   }
 };
 
+// Productos
+export const deleteProduct = async (req, res, next) => {
+  try {
+    const productId = req.params.id;
+
+    // En lugar de eliminar, solo desactivamos el producto
+    await pool.query(
+      "UPDATE products SET estado = 'inactivo', activo = 0 WHERE id = ?",
+      [productId],
+    );
+
+    res.json({ ok: true, message: "Producto desactivado correctamente" });
+  } catch (e) {
+    console.error("Error al desactivar producto:", e);
+    next(e);
+  }
+};
 // Banners
 export const getBanners = async (req, res, next) => {
   try {
@@ -311,6 +328,308 @@ export const updateShippingMethod = async (req, res, next) => {
       ],
     );
     success(res, null, "Método de envío actualizado");
+  } catch (e) {
+    next(e);
+  }
+};
+// Agrega esto al final de tu admin.controller.js
+export const getUsers = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 15;
+    const offset = (page - 1) * limit;
+    const search = req.query.search || "";
+    const rol = req.query.rol || "";
+
+    let query =
+      "SELECT id, nombre, email, telefono, rol, activo, created_at FROM users WHERE 1=1";
+    const params = [];
+
+    if (search) {
+      query += " AND (nombre LIKE ? OR email LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    if (rol) {
+      query += " AND rol = ?";
+      params.push(rol);
+    }
+
+    const [rows] = await pool.query(
+      query + " ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      [...params, limit, offset],
+    );
+    const [countResult] = await pool.query(
+      "SELECT COUNT(*) as total FROM users WHERE 1=1" +
+        (search ? " AND (nombre LIKE ? OR email LIKE ?)" : "") +
+        (rol ? " AND rol = ?" : ""),
+      params,
+    );
+
+    res.json({
+      ok: true,
+      data: rows,
+      meta: {
+        total: countResult[0].total,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil(countResult[0].total / limit),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const getUser = async (req, res, next) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, nombre, email, telefono, rol, activo, created_at FROM users WHERE id = ?",
+      [req.params.id],
+    );
+    if (rows.length === 0) {
+      return res
+        .status(404)
+        .json({ ok: false, message: "Usuario no encontrado" });
+    }
+    res.json({ ok: true, data: rows[0] });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const changeUserStatus = async (req, res, next) => {
+  try {
+    const { activo } = req.body;
+    await pool.query("UPDATE users SET activo = ? WHERE id = ?", [
+      activo ? 1 : 0,
+      req.params.id,
+    ]);
+    res.json({ ok: true, message: "Estado actualizado" });
+  } catch (e) {
+    next(e);
+  }
+};
+// Categorías
+export const getCategories = async (req, res, next) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM categories ORDER BY nombre");
+    res.json({ ok: true, data: rows });
+  } catch (e) {
+    next(e);
+  }
+};
+const generateSlug = (texto) => {
+  return texto
+    .toString()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Eliminar acentos
+    .replace(/[^a-z0-9]+/g, "-") // Reemplazar espacios con -
+    .replace(/^-|-$/g, ""); // Eliminar guiones al inicio y final
+};
+
+export const createCategory = async (req, res, next) => {
+  try {
+    const { nombre, parent_id, descripcion, imagen_url, orden, activo } =
+      req.body;
+
+    console.log("📁 Creando categoría:", { nombre, parent_id }); // Debug
+
+    // ✅ Generar slug
+    let slug = generateSlug(nombre);
+
+    // ✅ Verificar si el slug ya existe
+    const [existing] = await pool.query(
+      "SELECT id FROM categories WHERE slug = ?",
+      [slug],
+    );
+
+    if (existing.length > 0) {
+      slug = `${slug}-${Date.now()}`;
+    }
+
+    // ✅ Insertar categoría
+    const [r] = await pool.query(
+      `INSERT INTO categories (parent_id, nombre, slug, descripcion, imagen_url, orden, activo) 
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        parent_id || null,
+        nombre,
+        slug,
+        descripcion || null,
+        imagen_url || null,
+        orden || 0,
+        activo ?? 1,
+      ],
+    );
+
+    res.json({
+      ok: true,
+      data: { id: r.insertId },
+      message: "Categoría creada",
+    });
+  } catch (e) {
+    console.error("❌ Error en createCategory:", e);
+    next(e);
+  }
+};
+export const updateCategory = async (req, res, next) => {
+  try {
+    const { nombre, parent_id, descripcion, imagen_url, orden, activo } =
+      req.body;
+
+    await pool.query(
+      "UPDATE categories SET nombre = ?, parent_id = ?, descripcion = ?, imagen_url = ?, orden = ?, activo = ? WHERE id = ?",
+      [
+        nombre,
+        parent_id || null,
+        descripcion || null,
+        imagen_url || null,
+        orden || 0,
+        activo ?? 1,
+        req.params.id,
+      ],
+    );
+
+    res.json({ ok: true, message: "Categoría actualizada" });
+  } catch (e) {
+    next(e);
+  }
+};
+export const deleteCategory = async (req, res, next) => {
+  try {
+    await pool.query("DELETE FROM categories WHERE id = ?", [req.params.id]);
+    res.json({ ok: true, message: "Categoría eliminada" });
+  } catch (e) {
+    next(e);
+  }
+};
+// Reseñas
+export const getReviews = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 15;
+    const offset = (page - 1) * limit;
+    const aprobado =
+      req.query.aprobado === undefined ? null : parseInt(req.query.aprobado);
+
+    let query = `
+      SELECT r.*, u.nombre as usuario_nombre, p.nombre as producto_nombre 
+      FROM reviews r
+      JOIN users u ON r.user_id = u.id
+      JOIN products p ON r.product_id = p.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (aprobado !== null) {
+      query += " AND r.aprobado = ?";
+      params.push(aprobado);
+    }
+
+    query += " ORDER BY r.created_at DESC LIMIT ? OFFSET ?";
+
+    const [rows] = await pool.query(query, [...params, limit, offset]);
+    const [countResult] = await pool.query(
+      "SELECT COUNT(*) as total FROM reviews" +
+        (aprobado !== null ? " WHERE aprobado = ?" : ""),
+      aprobado !== null ? [aprobado] : [],
+    );
+
+    res.json({
+      ok: true,
+      data: rows,
+      meta: {
+        total: countResult[0].total,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil(countResult[0].total / limit),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const approveReview = async (req, res, next) => {
+  try {
+    await pool.query("UPDATE reviews SET aprobado = 1 WHERE id = ?", [
+      req.params.id,
+    ]);
+    res.json({ ok: true, message: "Reseña aprobada" });
+  } catch (e) {
+    next(e);
+  }
+};
+export const getProducts = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 15;
+    const offset = (page - 1) * limit;
+    const search = req.query.search || "";
+
+    let query = `
+      SELECT p.*, c.nombre as categoria_nombre 
+      FROM products p
+      LEFT JOIN categories c ON p.categoria_id = c.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (search) {
+      query += " AND (p.nombre LIKE ? OR p.descripcion LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    const [rows] = await pool.query(
+      query + " ORDER BY p.created_at DESC LIMIT ? OFFSET ?",
+      [...params, limit, offset],
+    );
+    const [countResult] = await pool.query(
+      "SELECT COUNT(*) as total FROM products",
+    );
+
+    res.json({
+      ok: true,
+      data: rows,
+      meta: {
+        total: countResult[0].total,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil(countResult[0].total / limit),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const updateProduct = async (req, res, next) => {
+  try {
+    const {
+      nombre,
+      descripcion,
+      precio_base,
+      precio_oferta,
+      stock_total,
+      categoria_id,
+      estado,
+    } = req.body;
+    await pool.query(
+      "UPDATE products SET nombre = ?, descripcion = ?, precio_base = ?, precio_oferta = ?, stock_total = ?, categoria_id = ?, estado = ? WHERE id = ?",
+      [
+        nombre,
+        descripcion,
+        precio_base,
+        precio_oferta,
+        stock_total,
+        categoria_id,
+        estado,
+        req.params.id,
+      ],
+    );
+    res.json({ ok: true, message: "Producto actualizado" });
   } catch (e) {
     next(e);
   }

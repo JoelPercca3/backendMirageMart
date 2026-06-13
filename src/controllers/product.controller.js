@@ -12,7 +12,14 @@ export const getAll = async (req, res, next) => {
 
 export const getOne = async (req, res, next) => {
   try {
-    success(res, await productSvc.getOne(Number(req.params.id)));
+    const product = await productSvc.getOne(Number(req.params.id));
+    console.log("🔍 Producto a enviar:", {
+      id: product.id,
+      nombre: product.nombre,
+      tieneVariantes: !!product.variants,
+      totalVariantes: product.variants?.length,
+    });
+    success(res, product);
   } catch (e) {
     next(e);
   }
@@ -53,33 +60,39 @@ export const getReviews = async (req, res, next) => {
   }
 };
 
-// ✅ CREATE actualizado
+// ✅ CREATE - CORREGIDO
 export const create = async (req, res, next) => {
   try {
-    const {
-      imagen_url,
-      imagenes,
-      atributos,
-      variantes, // ✅ NUEVO
-      ...productData
-    } = req.body;
+    const { imagenes, atributos, variantes, ...productData } = req.body;
 
     const product = await productSvc.create(productData);
 
     if (product?.id) {
-      // ✅ GUARDAR IMÁGENES
+      // ✅ GUARDAR SOLO IMÁGENES BASE (variant_id = null)
       if (imagenes && Array.isArray(imagenes) && imagenes.length > 0) {
-        for (let i = 0; i < imagenes.length; i++) {
+        // Normalizar: si es string, convertir a objeto
+        const normalizedImages = imagenes.map((img) =>
+          typeof img === "string" ? { url: img, variant_id: null } : img,
+        );
+
+        // Filtrar solo imágenes base (sin variant_id)
+        const baseImages = normalizedImages.filter((img) => !img.variant_id);
+
+        for (let i = 0; i < baseImages.length; i++) {
+          const img = baseImages[i];
           await pool.query(
-            "INSERT INTO product_images (product_id, url, es_principal, orden) VALUES (?, ?, ?, ?)",
-            [product.id, imagenes[i], i === 0 ? 1 : 0, i + 1],
+            `INSERT INTO product_images (product_id, variant_id, url, es_principal, orden, alt_text) 
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              product.id,
+              null,
+              img.url,
+              i === 0 ? 1 : 0,
+              i + 1,
+              img.alt_text || null,
+            ],
           );
         }
-      } else if (imagen_url) {
-        await pool.query(
-          "INSERT INTO product_images (product_id, url, es_principal, orden) VALUES (?, ?, 1, 1)",
-          [product.id, imagen_url],
-        );
       }
 
       // ✅ GUARDAR ATRIBUTOS
@@ -99,11 +112,11 @@ export const create = async (req, res, next) => {
         for (const v of variantes) {
           await pool.query(
             `INSERT INTO product_variants 
-            (product_id, sku_variante, opciones, precio_extra, stock, imagen_url, activo) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             (product_id, sku_variante, opciones, precio_extra, stock, imagen_url, activo) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
               product.id,
-              v.sku_variante || "",
+              v.sku_variante || `VAR-${product.id}-${Date.now()}`,
               JSON.stringify(v.opciones),
               v.precio_extra || 0,
               v.stock || 0,
@@ -116,71 +129,153 @@ export const create = async (req, res, next) => {
     }
 
     const productoCompleto = await productSvc.getOne(product.id);
-
     created(res, productoCompleto, "Producto creado");
   } catch (err) {
     next(err);
   }
 };
+
+// ✅ UPDATE - CORREGIDO
 export const update = async (req, res, next) => {
   try {
-    const { imagen_url, imagenes, atributos, ...productData } = req.body;
-    console.log("🏷️ Después de desestructurar - atributos:", atributos);
-    console.log(
-      "🏷️ Después de desestructurar - productData.atributos:",
-      productData.atributos,
-    );
-    const product = await productSvc.update(Number(req.params.id), productData);
+    const { imagenes, atributos, variantes, ...productData } = req.body;
+    const productId = Number(req.params.id);
 
-    // Actualizar imágenes
-    if (imagenes && Array.isArray(imagenes) && imagenes.length > 0) {
-      await pool.query("DELETE FROM product_images WHERE product_id = ?", [
-        req.params.id,
-      ]);
-      for (let i = 0; i < imagenes.length; i++) {
-        await pool.query(
-          "INSERT INTO product_images (product_id, url, es_principal, orden) VALUES (?, ?, ?, ?)",
-          [req.params.id, imagenes[i], i === 0 ? 1 : 0, i + 1],
-        );
-      }
-    } else if (imagen_url) {
-      const [[existing]] = await pool.query(
-        "SELECT id FROM product_images WHERE product_id = ? AND es_principal = 1 LIMIT 1",
-        [req.params.id],
+    // ─────────────────────────────────────────────
+    // 1. Actualizar datos del producto
+    // ─────────────────────────────────────────────
+    await productSvc.update(productId, productData);
+
+    // ─────────────────────────────────────────────
+    // 2. ACTUALIZAR SOLO IMÁGENES BASE
+    // ─────────────────────────────────────────────
+    if (imagenes && Array.isArray(imagenes)) {
+      // Normalizar: si es string, mantener como string
+      const validImages = imagenes.filter(
+        (img) => img && typeof img === "string" && img.trim() !== "",
       );
-      if (existing) {
-        await pool.query("UPDATE product_images SET url = ? WHERE id = ?", [
-          imagen_url,
-          existing.id,
-        ]);
-      } else {
+
+      // 🔥 SOLO borrar imágenes BASE (variant_id IS NULL)
+      await pool.query(
+        "DELETE FROM product_images WHERE product_id = ? AND variant_id IS NULL",
+        [productId],
+      );
+
+      // Insertar nuevas imágenes BASE
+      for (let i = 0; i < validImages.length; i++) {
         await pool.query(
-          "INSERT INTO product_images (product_id, url, es_principal, orden) VALUES (?, ?, 1, 1)",
-          [req.params.id, imagen_url],
+          `INSERT INTO product_images (product_id, variant_id, url, es_principal, orden, alt_text)
+           VALUES (?, NULL, ?, ?, ?, ?)`,
+          [productId, validImages[i], i === 0 ? 1 : 0, i + 1, null],
         );
       }
+
+      // Actualizar JSON legacy
+      await pool.query("UPDATE products SET imagenes = ? WHERE id = ?", [
+        JSON.stringify(validImages),
+        productId,
+      ]);
     }
 
-    // ✅ Actualizar atributos (borrar y re-insertar)
+    // ─────────────────────────────────────────────
+    // 3. ACTUALIZAR ATRIBUTOS
+    // ─────────────────────────────────────────────
     if (atributos && Array.isArray(atributos)) {
       await pool.query("DELETE FROM product_attributes WHERE product_id = ?", [
-        req.params.id,
+        productId,
       ]);
+
       for (const attr of atributos) {
         if (attr.atributo && attr.valor) {
           await pool.query(
-            "INSERT INTO product_attributes (product_id, atributo, valor) VALUES (?, ?, ?)",
-            [req.params.id, attr.atributo, attr.valor],
+            `INSERT INTO product_attributes (product_id, atributo, valor) VALUES (?, ?, ?)`,
+            [productId, attr.atributo, attr.valor],
           );
         }
       }
     }
 
-    success(res, product, "Producto actualizado");
+    // ─────────────────────────────────────────────
+    // 4. ACTUALIZAR VARIANTES (SOLO datos, NO imágenes)
+    // ─────────────────────────────────────────────
+    if (variantes && Array.isArray(variantes)) {
+      // Obtener IDs de variantes existentes en BD
+      const [existingVariants] = await pool.query(
+        "SELECT id FROM product_variants WHERE product_id = ?",
+        [productId],
+      );
+      const existingIds = existingVariants.map((v) => v.id);
+      const receivedIds = variantes.filter((v) => v.id).map((v) => v.id);
+
+      // IDs a eliminar
+      const idsToDelete = existingIds.filter((id) => !receivedIds.includes(id));
+
+      if (idsToDelete.length > 0) {
+        await pool.query(
+          "DELETE FROM product_variants WHERE id IN (?) AND product_id = ?",
+          [idsToDelete, productId],
+        );
+      }
+
+      // Actualizar o crear variantes
+      for (const v of variantes) {
+        const opcionesJson = JSON.stringify(v.opciones);
+        const skuVariante = v.sku_variante || `VAR-${productId}-${Date.now()}`;
+
+        if (v.id && existingIds.includes(v.id)) {
+          // ✅ ACTUALIZAR variante existente
+          await pool.query(
+            `UPDATE product_variants 
+             SET sku_variante = ?, opciones = ?, precio_extra = ?, stock = ?, imagen_url = ?, activo = ?
+             WHERE id = ? AND product_id = ?`,
+            [
+              skuVariante,
+              opcionesJson,
+              v.precio_extra || 0,
+              v.stock || 0,
+              v.imagen_url || null,
+              v.activo !== false ? 1 : 0,
+              v.id,
+              productId,
+            ],
+          );
+        } else if (!v.id) {
+          // ✅ CREAR nueva variante
+          const [existing] = await pool.query(
+            "SELECT id FROM product_variants WHERE sku_variante = ? AND product_id = ?",
+            [skuVariante, productId],
+          );
+
+          if (existing.length === 0) {
+            await pool.query(
+              `INSERT INTO product_variants 
+                (product_id, sku_variante, opciones, precio_extra, stock, imagen_url, activo) 
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [
+                productId,
+                skuVariante,
+                opcionesJson,
+                v.precio_extra || 0,
+                v.stock || 0,
+                v.imagen_url || null,
+                v.activo !== false ? 1 : 0,
+              ],
+            );
+          }
+        }
+      }
+    }
+
+    // ✅ OBTENER EL PRODUCTO COMPLETO
+    const productoCompleto = await productSvc.getOne(productId);
+
+    return success(res, productoCompleto, "Producto actualizado");
   } catch (err) {
+    console.error("❌ Error en update:", err);
     next(err);
   }
 };
+
 export const remove = async (req, res, next) => {
   try {
     await productSvc.remove(Number(req.params.id));

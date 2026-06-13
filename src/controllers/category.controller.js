@@ -5,26 +5,22 @@ import { generateSlug } from "../utils/generateCode.js";
 
 export const getAll = async (req, res, next) => {
   try {
+    // Devuelve TODAS las categorías activas (principales y subcategorías)
     const [rows] = await pool.query(
       `SELECT c.*, COUNT(p.id) as total_productos
        FROM categories c LEFT JOIN products p ON p.category_id=c.id AND p.estado='activo'
-       WHERE c.activo=1 GROUP BY c.id ORDER BY c.orden, c.nombre`,
+       WHERE c.activo=1 
+       GROUP BY c.id 
+       ORDER BY COALESCE(c.parent_id, c.id), c.orden, c.nombre`,
     );
-    const map = {};
-    const roots = [];
-    rows.forEach((r) => {
-      map[r.id] = { ...r, children: [] };
-    });
-    rows.forEach((r) => {
-      r.parent_id && map[r.parent_id]
-        ? map[r.parent_id].children.push(map[r.id])
-        : roots.push(map[r.id]);
-    });
-    success(res, roots);
+
+    // Devolver array plano (sin anidar) para facilitar el uso en el frontend
+    success(res, rows);
   } catch (e) {
     next(e);
   }
 };
+
 export const getOne = async (req, res, next) => {
   try {
     const [[cat]] = await pool.query(

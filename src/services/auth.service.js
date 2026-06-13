@@ -127,3 +127,40 @@ export const changePassword = async (userId, currentPassword, newPassword) => {
   const password_hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
   await userRepo.update(userId, { password_hash });
 };
+
+export const findOrCreateGoogleUser = async (profile) => {
+  const email = profile.emails[0].value;
+  const nombre = profile.displayName;
+  const googleId = profile.id;
+  const avatar_url = profile.photos?.[0]?.value || null; // ← OBTENER LA FOTO
+
+  let user = await userRepo.findByEmail(email);
+
+  if (!user) {
+    // Crear nuevo usuario con avatar_url
+    const id = await userRepo.create({
+      nombre,
+      email,
+      google_id: googleId,
+      avatar_url, // ← AGREGAR
+      email_verificado: 1,
+      activo: 1,
+    });
+    user = { id, email, nombre, rol: "cliente", avatar_url };
+  } else if (!user.google_id) {
+    // Vincular cuenta existente con Google y actualizar avatar
+    await userRepo.update(user.id, {
+      google_id: googleId,
+      avatar_url, // ← AGREGAR
+    });
+    user.avatar_url = avatar_url;
+    user.google_id = googleId;
+  } else if (user.avatar_url !== avatar_url && avatar_url) {
+    // Actualizar avatar si cambió
+    await userRepo.update(user.id, { avatar_url });
+    user.avatar_url = avatar_url;
+  }
+
+  return user;
+};
+export { generateTokens };

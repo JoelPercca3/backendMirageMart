@@ -31,9 +31,21 @@ export const productSchema = z.object({
 
   tags: z.array(z.string()).optional(),
 
-  imagen_url: z.string().optional(),
-
-  imagenes: z.array(z.string()).optional(),
+  // ✅ CORREGIDO: imagenes puede ser array de strings o array de objetos
+  imagenes: z
+    .array(
+      z.union([
+        z.string().url("Debe ser una URL válida"),
+        z.object({
+          url: z.string().url("Debe ser una URL válida"),
+          variant_id: z.number().nullable().optional(),
+          es_principal: z.number().optional(),
+          orden: z.number().optional(),
+          alt_text: z.string().optional(),
+        }),
+      ]),
+    )
+    .optional(),
 
   // ✅ ATRIBUTOS
   atributos: z
@@ -49,16 +61,12 @@ export const productSchema = z.object({
   variantes: z
     .array(
       z.object({
+        id: z.number().optional(), // ← Permitir ID para actualizar
         sku_variante: z.string().optional(),
-
         opciones: z.record(z.string()),
-
         precio_extra: z.coerce.number().default(0),
-
         stock: z.coerce.number().int().min(0).default(0),
-
         imagen_url: z.string().nullish(),
-
         activo: z.coerce.boolean().default(true),
       }),
     )

@@ -15,24 +15,51 @@ export const create = async (orderData, items, conn) => {
     ip_cliente,
   } = orderData;
 
+  // VALIDACIÓN DE NÚMEROS
+  const datos = {
+    user_id: Number(user_id) || 0,
+    address_id: Number(address_id) || 0,
+    shipping_method_id: Number(shipping_method_id) || 0,
+    coupon_id: coupon_id ? Number(coupon_id) : null,
+    codigo_orden,
+    subtotal: Number(subtotal) || 0,
+    descuento: Number(descuento) || 0,
+    costo_envio: Number(costo_envio) || 0,
+    total: Number(total) || 0,
+    notas_cliente,
+    ip_cliente,
+  };
+
   const [result] = await conn.query(
-    `INSERT INTO orders (user_id, address_id, shipping_method_id, coupon_id, codigo_orden,
-      subtotal, descuento, costo_envio, total, notas_cliente, ip_cliente)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
+    `INSERT INTO orders (
       user_id,
       address_id,
       shipping_method_id,
-      coupon_id || null,
+      coupon_id,
       codigo_orden,
       subtotal,
       descuento,
       costo_envio,
       total,
-      notas_cliente || null,
-      ip_cliente || null,
+      notas_cliente,
+      ip_cliente
+    )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      datos.user_id,
+      datos.address_id,
+      datos.shipping_method_id,
+      datos.coupon_id,
+      datos.codigo_orden,
+      datos.subtotal,
+      datos.descuento,
+      datos.costo_envio,
+      datos.total,
+      datos.notas_cliente || null,
+      datos.ip_cliente || null,
     ],
   );
+
   const orderId = result.insertId;
 
   for (const item of items) {
@@ -63,7 +90,7 @@ export const create = async (orderData, items, conn) => {
   return orderId;
 };
 
-export const findById = async (id) => {
+export const findById = async (id, userId) => {
   const [rows] = await pool.query(
     `SELECT o.*, u.nombre as cliente_nombre, u.email as cliente_email,
             sm.nombre as metodo_envio, sm.dias_entrega_min, sm.dias_entrega_max,
@@ -78,9 +105,19 @@ export const findById = async (id) => {
   if (!rows[0]) return null;
 
   const [items] = await pool.query(
-    `SELECT oi.*, p.slug as product_slug FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?`,
-    [id],
+    `SELECT oi.*, 
+          p.slug as product_slug,
+          p.nombre as nombre_producto,
+          (SELECT COUNT(*) > 0 FROM reviews 
+           WHERE product_id = oi.product_id 
+           AND user_id = ? 
+           AND order_id = oi.order_id) as has_reviewed
+   FROM order_items oi 
+   JOIN products p ON oi.product_id = p.id 
+   WHERE oi.order_id = ?`,
+    [userId, id],
   );
+
   const [history] = await pool.query(
     "SELECT estado, comentario, created_at FROM order_status_history WHERE order_id = ? ORDER BY id",
     [id],
@@ -97,12 +134,38 @@ export const findByUser = async (userId, { limit, offset }) => {
     "SELECT COUNT(*) as total FROM orders WHERE user_id = ?",
     [userId],
   );
+
   const [rows] = await pool.query(
-    `SELECT o.id, o.codigo_orden, o.estado, o.total, o.created_at, COUNT(oi.id) as total_items
-     FROM orders o LEFT JOIN order_items oi ON o.id = oi.order_id
-     WHERE o.user_id = ? GROUP BY o.id ORDER BY o.id DESC LIMIT ? OFFSET ?`,
+    `SELECT o.id, o.codigo_orden, o.estado, o.total, o.created_at, 
+            COUNT(oi.id) as total_items
+     FROM orders o 
+     LEFT JOIN order_items oi ON o.id = oi.order_id
+     WHERE o.user_id = ? 
+     GROUP BY o.id 
+     ORDER BY o.id DESC 
+     LIMIT ? OFFSET ?`,
     [userId, limit, offset],
   );
+
+  for (const order of rows) {
+    const [items] = await pool.query(
+      `SELECT 
+        oi.*, 
+        p.id as product_id,
+        p.nombre as product_name,
+        p.slug as product_slug,
+        (SELECT COUNT(*) > 0 FROM reviews 
+         WHERE product_id = oi.product_id 
+         AND user_id = ? 
+         AND order_id = oi.order_id) as has_reviewed
+       FROM order_items oi
+       JOIN products p ON oi.product_id = p.id
+       WHERE oi.order_id = ?`,
+      [userId, order.id],
+    );
+    order.items = items;
+  }
+
   return { rows, total };
 };
 

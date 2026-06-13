@@ -42,7 +42,16 @@ export const UPLOAD_DIR = process.env.UPLOAD_DIR || "uploads";
 export const MAX_FILE_SIZE =
   Number(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024;
 
-// Cloudinary ← estas 3 leen del .env correctamente
+// Cloudinary
 export const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME;
 export const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
 export const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET;
+
+// Culqi
+export const CULQI_PUBLIC_KEY = process.env.CULQI_PUBLIC_KEY;
+export const CULQI_SECRET_KEY = process.env.CULQI_SECRET_KEY;
+
+// ========== GOOGLE OAUTH ==========
+export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+export const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL;

@@ -1,4 +1,3 @@
-// ═══════════════════════════ order.controller.js ════════════════════════════
 import * as orderSvc from "../services/order.service.js";
 import { success, created, paginated } from "../utils/response.js";
 
@@ -13,6 +12,7 @@ export const orderCreate = async (req, res, next) => {
     next(e);
   }
 };
+
 export const myOrders = async (req, res, next) => {
   try {
     paginated(res, await orderSvc.myOrders(req.user.id, req.query));
@@ -20,6 +20,7 @@ export const myOrders = async (req, res, next) => {
     next(e);
   }
 };
+
 export const orderGetOne = async (req, res, next) => {
   try {
     success(
@@ -30,6 +31,7 @@ export const orderGetOne = async (req, res, next) => {
     next(e);
   }
 };
+
 export const cancel = async (req, res, next) => {
   try {
     await orderSvc.cancel(Number(req.params.id), req.user.id);
@@ -38,13 +40,25 @@ export const cancel = async (req, res, next) => {
     next(e);
   }
 };
+
 export const orderGetAll = async (req, res, next) => {
   try {
-    paginated(res, await orderSvc.getAll(req.query));
+    const result = await orderSvc.getAll(req.query);
+    res.json({
+      ok: true,
+      data: result.data,
+      meta: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
+      },
+    });
   } catch (e) {
     next(e);
   }
 };
+
 export const orderUpdateStatus = async (req, res, next) => {
   try {
     await orderSvc.updateStatus(
@@ -58,6 +72,7 @@ export const orderUpdateStatus = async (req, res, next) => {
     next(e);
   }
 };
+
 export const orderUpdateTracking = async (req, res, next) => {
   try {
     await orderSvc.updateTracking(

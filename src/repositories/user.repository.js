@@ -22,6 +22,7 @@ export const create = async ({
   password_hash,
   telefono,
   token_verificacion,
+  avatar_url, // ← AGREGAR
 }) => {
   const [result] = await pool.query(
     "INSERT INTO users (nombre, email, password_hash, telefono, token_verificacion) VALUES (?, ?, ?, ?, ?)",

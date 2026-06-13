@@ -3,7 +3,8 @@ import { success } from "../utils/response.js";
 
 export const getCart = async (req, res, next) => {
   try {
-    success(res, await cartSvc.getCart(req.user.id));
+    const cart = await cartSvc.getCart(req.user.id);
+    success(res, cart);
   } catch (e) {
     next(e);
   }
@@ -24,8 +25,8 @@ export const updateQuantity = async (req, res, next) => {
     success(
       res,
       await cartSvc.updateQuantity(
-        req.user.id,
-        Number(req.params.id),
+        req.user.id, // ← userId
+        Number(req.params.id), // ← cartItemId
         req.body.cantidad,
       ),
     );
@@ -33,11 +34,15 @@ export const updateQuantity = async (req, res, next) => {
     next(e);
   }
 };
+
 export const removeItem = async (req, res, next) => {
   try {
     success(
       res,
-      await cartSvc.removeItem(req.user.id, Number(req.params.id)),
+      await cartSvc.removeItem(
+        req.user.id, // ← userId
+        Number(req.params.id), // ← cartItemId
+      ),
       "Item eliminado",
     );
   } catch (e) {
@@ -60,6 +65,19 @@ export const applyCoupon = async (req, res, next) => {
       "Cupón aplicado",
     );
   } catch (e) {
+    next(e);
+  }
+};
+// ... tus funciones existentes ...
+
+// Agregar esta nueva función
+export const mergeCart = async (req, res, next) => {
+  try {
+    console.log("📥 mergeCart controller - body:", req.body);
+    const result = await cartSvc.mergeCart(req.user.id, req.body.items);
+    success(res, result, "Carrito fusionado");
+  } catch (e) {
+    console.error("❌ Error en mergeCart:", e);
     next(e);
   }
 };

@@ -11,4 +11,9 @@ cloudinary.config({
   api_secret: CLOUDINARY_API_SECRET,
 });
 
+// Configuración global de upload
+cloudinary.config({
+  quality: "auto:good",
+  fetch_format: "auto",
+});
 export default cloudinary;

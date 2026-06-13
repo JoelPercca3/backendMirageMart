@@ -1,19 +1,40 @@
 import { Router } from "express";
 import * as ctrl from "../controllers/admin.controller.js";
+import * as orderCtrl from "../controllers/order.controller.js";
 import { authJWT } from "../middlewares/auth.middleware.js";
 import { isAdmin } from "../middlewares/isAdmin.middleware.js";
 
 const router = Router();
 
-// Todos los endpoints de admin requieren JWT + rol admin
 router.use(authJWT, isAdmin);
 
-// Dashboard y estadísticas
+// Dashboard
 router.get("/dashboard", ctrl.dashboard);
 router.get("/stats/sales", ctrl.salesStats);
 router.get("/stats/products", ctrl.productStats);
 router.get("/stats/users", ctrl.userStats);
 router.get("/stats/revenue", ctrl.revenueStats);
+
+// Usuarios
+router.get("/users", ctrl.getUsers);
+router.get("/users/:id", ctrl.getUser);
+router.patch("/users/:id/status", ctrl.changeUserStatus);
+
+// Órdenes
+router.get("/orders", orderCtrl.orderGetAll);
+router.get("/orders/:id", orderCtrl.orderGetOne);
+router.patch("/orders/:id/status", orderCtrl.orderUpdateStatus);
+router.patch("/orders/:id/tracking", orderCtrl.orderUpdateTracking);
+
+// Categorías
+router.get("/categories", ctrl.getCategories);
+router.post("/categories", ctrl.createCategory);
+router.put("/categories/:id", ctrl.updateCategory);
+router.delete("/categories/:id", ctrl.deleteCategory);
+
+// Reseñas
+router.get("/reviews", ctrl.getReviews);
+router.patch("/reviews/:id/approve", ctrl.approveReview);
 
 // Cupones
 router.get("/coupons", ctrl.getCoupons);
@@ -27,11 +48,11 @@ router.post("/banners", ctrl.createBanner);
 router.put("/banners/:id", ctrl.updateBanner);
 router.delete("/banners/:id", ctrl.deleteBanner);
 
-// Configuración del sistema
+// Settings
 router.get("/settings", ctrl.getSettings);
 router.put("/settings", ctrl.updateSettings);
 
-// Métodos de envío
+// Shipping
 router.get("/shipping", ctrl.getShippingMethods);
 router.post("/shipping", ctrl.createShippingMethod);
 router.put("/shipping/:id", ctrl.updateShippingMethod);

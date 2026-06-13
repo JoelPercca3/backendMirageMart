@@ -30,54 +30,88 @@ export const getAll = async ({
   }
 
   if (min_price) {
-    where += " AND p.precio_final >= ?";
-    params.push(min_price);
+    where += " AND COALESCE(p.precio_oferta, p.precio_base) >= ?";
+    params.push(parseFloat(min_price));
   }
 
   if (max_price) {
-    where += " AND p.precio_final <= ?";
-    params.push(max_price);
-  }
-
-  if (estado !== undefined && estado !== null && estado !== "") {
-    where += " AND p.estado = ?";
-    params.push(estado);
+    where += " AND COALESCE(p.precio_oferta, p.precio_base) <= ?";
+    params.push(parseFloat(max_price));
   }
 
   let orderBy = "ORDER BY p.id DESC";
   if (sort) {
     const [field, direction] = sort.split(":");
     if (field === "precio") {
-      orderBy = `ORDER BY p.precio_final ${direction === "desc" ? "DESC" : "ASC"}`;
+      orderBy = `ORDER BY COALESCE(p.precio_oferta, p.precio_base) ${direction === "desc" ? "DESC" : "ASC"}`;
     } else if (field === "nombre") {
       orderBy = `ORDER BY p.nombre ${direction === "desc" ? "DESC" : "ASC"}`;
     } else if (field === "created_at") {
       orderBy = `ORDER BY p.created_at ${direction === "desc" ? "DESC" : "ASC"}`;
+    } else if (field === "ventas") {
+      orderBy = `ORDER BY p.ventas_count DESC`;
+    } else if (field === "rating") {
+      orderBy = `ORDER BY p.rating_promedio DESC`;
     }
   }
-
   const [[{ total }]] = await pool.query(
     `SELECT COUNT(*) as total FROM products p ${where}`,
     params,
   );
 
-  // ✅ Usar las tablas correctas en inglés: categories y brands
-  // ✅ Obtener la primera imagen de product_images
   const [rows] = await pool.query(
     `SELECT 
-    p.*,
-    c.nombre as categoria,
-    b.nombre as marca,
-    (SELECT url FROM product_images WHERE product_id = p.id AND es_principal = 1 LIMIT 1) as imagen_principal,
-    (SELECT COUNT(*) FROM order_items WHERE product_id = p.id) as ventas_count
-   FROM products p 
-   LEFT JOIN categories c ON p.category_id = c.id 
-   LEFT JOIN brands b ON p.brand_id = b.id 
-   ${where} 
-   ${orderBy} 
-   LIMIT ? OFFSET ?`,
+      p.*,
+      c.nombre as categoria,
+      b.nombre as marca,
+      (
+        SELECT COUNT(*)
+        FROM order_items
+        WHERE product_id = p.id
+      ) as ventas_count
+     FROM products p
+     LEFT JOIN categories c ON p.category_id = c.id
+     LEFT JOIN brands b ON p.brand_id = b.id
+     ${where}
+     ${orderBy}
+     LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
+
+  // Obtener imágenes para todos los productos
+  if (rows.length > 0) {
+    const productIds = rows.map((row) => row.id);
+    const [allImages] = await pool.query(
+      `SELECT product_id, id, url, variant_id, es_principal, orden, alt_text
+       FROM product_images
+       WHERE product_id IN (?)
+       ORDER BY product_id, variant_id IS NULL DESC, variant_id, orden`,
+      [productIds],
+    );
+
+    const imagesMap = {};
+    allImages.forEach((img) => {
+      if (!imagesMap[img.product_id]) {
+        imagesMap[img.product_id] = [];
+      }
+      imagesMap[img.product_id].push({
+        id: img.id,
+        url: img.url,
+        variant_id: img.variant_id,
+        es_principal: img.es_principal,
+        orden: img.orden,
+        alt_text: img.alt_text,
+      });
+    });
+
+    rows.forEach((row) => {
+      row.images = imagesMap[row.id] || [];
+    });
+  } else {
+    rows.forEach((row) => {
+      row.images = [];
+    });
+  }
 
   return { rows, total };
 };
@@ -95,14 +129,20 @@ export const findById = async (id) => {
   );
   if (!rows[0]) return null;
 
+  // ✅ CORREGIDO: Orden: primero imágenes base, luego por variante
   const [images] = await pool.query(
-    "SELECT id, url, alt_text, es_principal, orden FROM product_images WHERE product_id = ? ORDER BY orden",
+    `SELECT id, url, alt_text, es_principal, orden, variant_id 
+     FROM product_images 
+     WHERE product_id = ? 
+     ORDER BY variant_id IS NULL DESC, variant_id, orden`,
     [id],
   );
+
   const [attrs] = await pool.query(
     "SELECT atributo, valor FROM product_attributes WHERE product_id = ?",
     [id],
   );
+
   const [variants] = await pool.query(
     "SELECT id, sku_variante, opciones, precio_extra, stock, imagen_url FROM product_variants WHERE product_id = ? AND activo = 1",
     [id],
@@ -211,14 +251,40 @@ export const getFeatured = async (limit = 12) => {
   const [rows] = await pool.query(
     `SELECT p.id, p.nombre, p.slug,
             COALESCE(p.precio_oferta, p.precio_base) as precio_final,
-            p.precio_base, p.precio_oferta, p.porcentaje_desc, p.rating_promedio,
-            pi.url as imagen_principal
+            p.precio_base, p.precio_oferta, p.porcentaje_desc, p.rating_promedio
      FROM products p
-     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.es_principal = 1
      WHERE p.estado = 'activo' AND p.es_destacado = 1
      ORDER BY p.ventas_count DESC LIMIT ?`,
     [limit],
   );
+
+  if (rows.length > 0) {
+    const productIds = rows.map((row) => row.id);
+    const [allImages] = await pool.query(
+      `SELECT product_id, id, url, variant_id, es_principal, orden
+       FROM product_images
+       WHERE product_id IN (?)
+       ORDER BY product_id, variant_id IS NULL DESC, variant_id, orden`,
+      [productIds],
+    );
+
+    const imagesMap = {};
+    allImages.forEach((img) => {
+      if (!imagesMap[img.product_id]) imagesMap[img.product_id] = [];
+      imagesMap[img.product_id].push({
+        id: img.id,
+        url: img.url,
+        variant_id: img.variant_id,
+        es_principal: img.es_principal,
+        orden: img.orden,
+      });
+    });
+
+    rows.forEach((row) => {
+      row.images = imagesMap[row.id] || [];
+    });
+  }
+
   return rows;
 };
 
@@ -226,14 +292,43 @@ export const getRelated = async (productId, categoryId, limit = 8) => {
   const [rows] = await pool.query(
     `SELECT p.id, p.nombre, p.slug,
             COALESCE(p.precio_oferta, p.precio_base) as precio_final,
-            p.precio_base, p.precio_oferta, p.porcentaje_desc, p.rating_promedio,
-            pi.url as imagen_principal
+            p.precio_base, p.precio_oferta, p.porcentaje_desc, p.rating_promedio
      FROM products p
-     LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.es_principal = 1
      WHERE p.category_id = ? AND p.id != ? AND p.estado = 'activo'
      ORDER BY p.ventas_count DESC LIMIT ?`,
     [categoryId, productId, limit],
   );
+
+  if (rows.length > 0) {
+    const productIds = rows.map((row) => row.id);
+    const [allImages] = await pool.query(
+      `SELECT product_id, id, url, variant_id, es_principal, orden, alt_text
+       FROM product_images
+       WHERE product_id IN (?)
+       ORDER BY product_id, variant_id IS NULL DESC, variant_id, orden`,
+      [productIds],
+    );
+
+    const imagesMap = {};
+    allImages.forEach((img) => {
+      if (!imagesMap[img.product_id]) {
+        imagesMap[img.product_id] = [];
+      }
+      imagesMap[img.product_id].push({
+        id: img.id,
+        url: img.url,
+        variant_id: img.variant_id,
+        es_principal: img.es_principal,
+        orden: img.orden,
+        alt_text: img.alt_text,
+      });
+    });
+
+    rows.forEach((row) => {
+      row.images = imagesMap[row.id] || [];
+    });
+  }
+
   return rows;
 };
 
