@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authJWT } from "../middlewares/auth.middleware.js";
 import { isAdmin } from "../middlewares/isAdmin.middleware.js";
-import { upload } from "../middlewares/upload.middleware.js";
+import { uploadProduct } from "../middlewares/upload.middleware.js"; // ← actualizado
 import * as variantCtrl from "../controllers/variant.controller.js";
 
 const router = Router();
@@ -19,7 +19,7 @@ router.post(
   "/:variantId/images",
   authJWT,
   isAdmin,
-  upload.single("image"),
+  uploadProduct.single("image"), // ← actualizado
   variantCtrl.addImageToVariant,
 );
 

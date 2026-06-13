@@ -551,12 +551,35 @@ export const getReviews = async (req, res, next) => {
     next(e);
   }
 };
-
 export const approveReview = async (req, res, next) => {
   try {
+    // Obtener product_id antes de aprobar
+    const [[rev]] = await pool.query(
+      "SELECT product_id FROM reviews WHERE id = ?",
+      [req.params.id],
+    );
+
+    if (!rev) {
+      return res
+        .status(404)
+        .json({ ok: false, message: "Reseña no encontrada" });
+    }
+
+    // Aprobar la reseña
     await pool.query("UPDATE reviews SET aprobado = 1 WHERE id = ?", [
       req.params.id,
     ]);
+
+    // ✅ Actualizar rating del producto
+    await pool.query(
+      `UPDATE products 
+       SET 
+         rating_promedio = (SELECT AVG(r.calificacion) FROM reviews r WHERE r.product_id = ? AND r.aprobado = 1),
+         rating_count    = (SELECT COUNT(*)             FROM reviews r WHERE r.product_id = ? AND r.aprobado = 1)
+       WHERE id = ?`,
+      [rev.product_id, rev.product_id, rev.product_id],
+    );
+
     res.json({ ok: true, message: "Reseña aprobada" });
   } catch (e) {
     next(e);

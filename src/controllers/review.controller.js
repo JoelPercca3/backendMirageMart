@@ -102,23 +102,46 @@ export const getAll = async (req, res, next) => {
 };
 export const approve = async (req, res, next) => {
   try {
-    await pool.query("UPDATE reviews SET aprobado=1 WHERE id=?", [
-      req.params.id,
-    ]);
     const [[rev]] = await pool.query(
-      "SELECT product_id FROM reviews WHERE id=?",
+      "SELECT product_id FROM reviews WHERE id = ?",
       [req.params.id],
     );
-    if (rev)
-      await pool.query(
-        `UPDATE products SET rating_promedio=(SELECT AVG(calificacion) FROM reviews WHERE product_id=? AND aprobado=1), rating_count=(SELECT COUNT(*) FROM reviews WHERE product_id=? AND aprobado=1) WHERE id=?`,
-        [rev.product_id, rev.product_id, rev.product_id],
-      );
+
+    console.log(
+      "✅ Aprobando reseña:",
+      req.params.id,
+      "→ product_id:",
+      rev?.product_id,
+    );
+
+    if (!rev) throw new AppError("Reseña no encontrada", 404);
+
+    await pool.query("UPDATE reviews SET aprobado = 1 WHERE id = ?", [
+      req.params.id,
+    ]);
+
+    const [updateResult] = await pool.query(
+      `UPDATE products 
+       SET 
+         rating_promedio = (SELECT AVG(r.calificacion) FROM reviews r WHERE r.product_id = ? AND r.aprobado = 1),
+         rating_count    = (SELECT COUNT(*) FROM reviews r WHERE r.product_id = ? AND r.aprobado = 1)
+       WHERE id = ?`,
+      [rev.product_id, rev.product_id, rev.product_id],
+    );
+
+    console.log(
+      "✅ Update result:",
+      updateResult.affectedRows,
+      "filas afectadas",
+    );
+
     success(res, null, "Reseña aprobada");
   } catch (e) {
+    console.error("❌ Error en approve:", e);
     next(e);
   }
 };
+// Reemplaza solo la función getByProduct en review.controller.js
 
 export const getByProduct = async (req, res, next) => {
   try {
@@ -142,8 +165,23 @@ export const getByProduct = async (req, res, next) => {
       [productId, Number(limit), Number(offset)],
     );
 
+    // ✅ FIX: parsear imagenes de string JSON a array antes de enviar
+    const parsed = rows.map((row) => ({
+      ...row,
+      imagenes: (() => {
+        if (!row.imagenes) return [];
+        if (Array.isArray(row.imagenes)) return row.imagenes;
+        try {
+          const result = JSON.parse(row.imagenes);
+          return Array.isArray(result) ? result : [];
+        } catch {
+          return [];
+        }
+      })(),
+    }));
+
     paginated(res, {
-      data: rows,
+      data: parsed,
       total,
       page: Number(page),
       limit: Number(limit),

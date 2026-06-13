@@ -1,54 +1,99 @@
 import cloudinary from "../config/cloudinary.js";
 import { success, error } from "../utils/response.js";
 
-// 🔧 FUNCIÓN PARA LIMPIAR URL
+// ─── Limpia transformaciones incrustadas en la URL de Cloudinary ──────────────
 const cleanCloudinaryUrl = (url) => {
   if (!url || !url.includes("cloudinary")) return url;
-  // Elimina cualquier transformación entre /upload/ y v123456
   return url.replace(/\/upload\/[^/]*?(v\d+)/, "/upload/$1");
 };
 
-export const uploadImage = async (req, res, next) => {
+// ─── Helper: extrae datos de un archivo multer ────────────────────────────────
+const fileToResponse = (file) => ({
+  url: cleanCloudinaryUrl(file.path),
+  filename: file.filename,
+});
+
+// ─── Un solo archivo ──────────────────────────────────────────────────────────
+
+/** Sube una imagen de producto (admin) */
+export const uploadProductImage = async (req, res, next) => {
   try {
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: "miragemart/products",
-      transformation: [
-        { width: 1600, height: 1600, crop: "limit" },
-        { quality: "auto:good" },
-        { fetch_format: "auto" },
-      ],
-    });
-
     if (!req.file) return error(res, "No se recibió ningún archivo", 400);
-
-    // Limpia la URL antes de enviarla al frontend
-    const cleanUrl = cleanCloudinaryUrl(req.file.path);
-
     success(
       res,
-      { url: cleanUrl, filename: req.file.filename },
-      "Imagen subida exitosamente",
+      fileToResponse(req.file),
+      "Imagen de producto subida exitosamente",
     );
   } catch (e) {
     next(e);
   }
 };
 
-export const uploadImages = async (req, res, next) => {
+/** Sube múltiples imágenes de producto (admin) */
+export const uploadProductImages = async (req, res, next) => {
   try {
     if (!req.files?.length) return error(res, "No se recibieron archivos", 400);
-
-    const files = req.files.map((f) => ({
-      url: cleanCloudinaryUrl(f.path), // ← LIMPIA CADA URL
-      filename: f.filename,
-    }));
-
-    success(res, files, `${files.length} imágenes subidas`);
+    success(
+      res,
+      req.files.map(fileToResponse),
+      `${req.files.length} imágenes subidas`,
+    );
   } catch (e) {
     next(e);
   }
 };
 
+/** Sube una imagen de reseña (usuario autenticado) */
+export const uploadReviewImage = async (req, res, next) => {
+  try {
+    if (!req.file) return error(res, "No se recibió ningún archivo", 400);
+    success(
+      res,
+      fileToResponse(req.file),
+      "Imagen de reseña subida exitosamente",
+    );
+  } catch (e) {
+    next(e);
+  }
+};
+
+/** Sube el avatar del usuario (usuario autenticado) */
+export const uploadAvatarImage = async (req, res, next) => {
+  try {
+    if (!req.file) return error(res, "No se recibió ningún archivo", 400);
+    success(res, fileToResponse(req.file), "Avatar actualizado exitosamente");
+  } catch (e) {
+    next(e);
+  }
+};
+
+/** Sube un banner (admin) */
+export const uploadBannerImage = async (req, res, next) => {
+  try {
+    if (!req.file) return error(res, "No se recibió ningún archivo", 400);
+    success(res, fileToResponse(req.file), "Banner subido exitosamente");
+  } catch (e) {
+    next(e);
+  }
+};
+
+/** Sube una imagen de categoría (admin) */
+export const uploadCategoryImage = async (req, res, next) => {
+  try {
+    if (!req.file) return error(res, "No se recibió ningún archivo", 400);
+    success(
+      res,
+      fileToResponse(req.file),
+      "Imagen de categoría subida exitosamente",
+    );
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ─── Eliminar archivo de Cloudinary ──────────────────────────────────────────
+
+/** Elimina un archivo por public_id (admin) */
 export const deleteFile = async (req, res, next) => {
   try {
     const { public_id } = req.body;
