@@ -1,5 +1,6 @@
 import { pool } from "../config/database.js";
 import { success, created } from "../utils/response.js";
+import { createNotification } from "../services/notification.service.js";
 
 export const dashboard = async (req, res, next) => {
   try {
@@ -653,6 +654,44 @@ export const updateProduct = async (req, res, next) => {
       ],
     );
     res.json({ ok: true, message: "Producto actualizado" });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const sendPromo = async (req, res, next) => {
+  try {
+    const { titulo, mensaje, url_accion, tipo = "promo" } = req.body;
+
+    if (!titulo || !mensaje) {
+      return res
+        .status(400)
+        .json({ ok: false, message: "Título y mensaje son requeridos" });
+    }
+
+    // Obtener todos los usuarios activos (clientes)
+    const [users] = await pool.query(
+      "SELECT id FROM users WHERE rol = 'cliente' AND activo = 1",
+    );
+
+    if (!users.length) {
+      return res
+        .status(400)
+        .json({ ok: false, message: "No hay usuarios activos" });
+    }
+
+    // Enviar notificación a cada usuario
+    await Promise.all(
+      users.map((user) =>
+        createNotification(user.id, titulo, mensaje, tipo, url_accion || null),
+      ),
+    );
+
+    res.json({
+      ok: true,
+      message: `Promoción enviada a ${users.length} usuarios`,
+      data: { total: users.length },
+    });
   } catch (e) {
     next(e);
   }

@@ -57,4 +57,6 @@ router.get("/shipping", ctrl.getShippingMethods);
 router.post("/shipping", ctrl.createShippingMethod);
 router.put("/shipping/:id", ctrl.updateShippingMethod);
 
+router.post("/promos/send", ctrl.sendPromo);
+
 export default router;

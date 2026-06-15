@@ -12,6 +12,7 @@ import uploadRoutes from "./upload.routes.js";
 import adminRoutes from "./admin.routes.js";
 import { pool } from "../config/database.js";
 import variantRoutes from "./variant.routes.js";
+import notificationRoutes from "./notification.routes.js";
 
 const router = Router();
 
@@ -27,6 +28,7 @@ router.use("/wishlist", wishlistRoutes);
 router.use("/uploads", uploadRoutes);
 router.use("/admin", adminRoutes);
 router.use("/admin/variants", variantRoutes);
+router.use("/notifications", notificationRoutes);
 
 // ← Ruta pública para métodos de envío
 router.get("/shipping", async (req, res) => {
