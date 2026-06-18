@@ -23,58 +23,52 @@ const fileFilter = (_req, file, cb) => {
 };
 
 // ─── Factory: crea un storage de Cloudinary por contexto ─────────────────────
-const createStorage = (folder, width, height) =>
+// ✅ Sin transformation — guarda la imagen ORIGINAL sin tocarla
+// Las transformaciones se aplican en el frontend al momento de pedir la imagen
+const createStorage = (folder) =>
   new CloudinaryStorage({
     cloudinary,
     params: {
       folder,
       allowed_formats: ["jpg", "jpeg", "png", "webp", "gif", "avif"],
-      transformation: [
-        {
-          width,
-          height,
-          crop: "limit",
-          quality: "auto",
-          fetch_format: "auto",
-        },
-      ],
+      // Sin transformation: Cloudinary guarda el original completo
     },
   });
 
 // ─── Instancias multer por contexto ──────────────────────────────────────────
 const limits = { fileSize: 10 * 1024 * 1024 }; // 10 MB
 
-/** Imágenes de productos  — 1200×1200, solo admins */
+/** Imágenes de productos — original sin transformar, solo admins */
 export const uploadProduct = multer({
-  storage: createStorage("miragemart/products", 1200, 1200),
+  storage: createStorage("miragemart/products"),
   fileFilter,
   limits,
 });
 
-/** Banners / hero  — 1920×600, solo admins */
+/** Banners / hero — original sin transformar, solo admins */
 export const uploadBanner = multer({
-  storage: createStorage("miragemart/banners", 1920, 600),
+  storage: createStorage("miragemart/banners"),
   fileFilter,
   limits,
 });
 
-/** Imágenes de categorías — 800×800, solo admins */
+/** Imágenes de categorías — original sin transformar, solo admins */
 export const uploadCategory = multer({
-  storage: createStorage("miragemart/categories", 800, 800),
+  storage: createStorage("miragemart/categories"),
   fileFilter,
   limits,
 });
 
-/** Imágenes de reseñas — 800×800, cualquier usuario autenticado */
+/** Imágenes de reseñas — original sin transformar, cualquier usuario autenticado */
 export const uploadReview = multer({
-  storage: createStorage("miragemart/reviews", 800, 800),
+  storage: createStorage("miragemart/reviews"),
   fileFilter,
   limits,
 });
 
-/** Avatar de perfil — 400×400, cualquier usuario autenticado */
+/** Avatar de perfil — original sin transformar, cualquier usuario autenticado */
 export const uploadAvatar = multer({
-  storage: createStorage("miragemart/avatars", 400, 400),
+  storage: createStorage("miragemart/avatars"),
   fileFilter,
   limits,
 });
