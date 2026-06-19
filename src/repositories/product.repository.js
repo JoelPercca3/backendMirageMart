@@ -1,4 +1,5 @@
 import { pool } from "../config/database.js";
+// repositories/product.repository.js
 
 export const getAll = async ({
   limit,
@@ -14,11 +15,31 @@ export const getAll = async ({
   let where = "WHERE 1=1";
   const params = [];
 
+  // ✅ BUSCAR CON SINÓNIMOS (recibe términos separados por coma)
   if (search) {
-    where += " AND (p.nombre LIKE ? OR p.sku LIKE ?)";
-    params.push(`%${search}%`, `%${search}%`);
+    const terminos = search
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    console.log("🔍 Términos de búsqueda (admin):", terminos);
+
+    if (terminos.length > 0) {
+      const conditions = terminos
+        .map(
+          () =>
+            "(p.nombre LIKE ? OR p.descripcion LIKE ? OR p.sku LIKE ? OR p.tags LIKE ?)",
+        )
+        .join(" OR ");
+      where += ` AND (${conditions})`;
+      terminos.forEach((t) => {
+        const like = `%${t}%`;
+        params.push(like, like, like, like);
+      });
+    }
   }
 
+  // ─── FILTROS ────────────────────────────────────────────────────────────────
   if (category_id) {
     where += " AND p.category_id = ?";
     params.push(category_id);
@@ -39,26 +60,36 @@ export const getAll = async ({
     params.push(parseFloat(max_price));
   }
 
+  if (estado !== undefined && estado !== "") {
+    where += " AND p.estado = ?";
+    params.push(estado);
+  }
+
+  // ─── ORDEN ──────────────────────────────────────────────────────────────────
   let orderBy = "ORDER BY p.id DESC";
   if (sort) {
     const [field, direction] = sort.split(":");
+    const dir = direction === "desc" ? "DESC" : "ASC";
     if (field === "precio") {
-      orderBy = `ORDER BY COALESCE(p.precio_oferta, p.precio_base) ${direction === "desc" ? "DESC" : "ASC"}`;
+      orderBy = `ORDER BY COALESCE(p.precio_oferta, p.precio_base) ${dir}`;
     } else if (field === "nombre") {
-      orderBy = `ORDER BY p.nombre ${direction === "desc" ? "DESC" : "ASC"}`;
+      orderBy = `ORDER BY p.nombre ${dir}`;
     } else if (field === "created_at") {
-      orderBy = `ORDER BY p.created_at ${direction === "desc" ? "DESC" : "ASC"}`;
+      orderBy = `ORDER BY p.created_at ${dir}`;
     } else if (field === "ventas") {
       orderBy = `ORDER BY p.ventas_count DESC`;
     } else if (field === "rating") {
       orderBy = `ORDER BY p.rating_promedio DESC`;
     }
   }
+
+  // ─── COUNT ──────────────────────────────────────────────────────────────────
   const [[{ total }]] = await pool.query(
     `SELECT COUNT(*) as total FROM products p ${where}`,
     params,
   );
 
+  // ─── QUERY ──────────────────────────────────────────────────────────────────
   const [rows] = await pool.query(
     `SELECT 
       p.*,
@@ -78,7 +109,7 @@ export const getAll = async ({
     [...params, limit, offset],
   );
 
-  // Obtener imágenes para todos los productos
+  // ─── IMÁGENES ──────────────────────────────────────────────────────────────
   if (rows.length > 0) {
     const productIds = rows.map((row) => row.id);
     const [allImages] = await pool.query(
@@ -115,7 +146,6 @@ export const getAll = async ({
 
   return { rows, total };
 };
-
 export const findById = async (id) => {
   const [rows] = await pool.query(
     `SELECT p.*,
