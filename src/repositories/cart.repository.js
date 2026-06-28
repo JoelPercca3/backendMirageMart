@@ -11,8 +11,13 @@ export const getByUser = async (userId) => {
       c.updated_at,
       c.precio_unitario,
       c.precio_extra,
+      c.precio_base,
+      c.porcentaje_desc,
+      c.rating_promedio,
+      c.rating_count,
+      c.ventas_count,
       p.nombre as product_name,
-      p.precio_base,
+      p.precio_base as product_precio_base,
       p.precio_oferta,
       p.descripcion_corta,
       p.sku,
@@ -31,17 +36,25 @@ export const getByUser = async (userId) => {
 
   return rows;
 };
-
 export const addOrUpdate = async (userId, productId, variantId, cantidad) => {
-  // 🔥 Obtener el precio correcto del producto
+  // 🔥 Obtener TODOS los datos del producto
   let precioUnitario = null;
   let precioExtra = 0;
+  let precioBase = 0;
+  let porcentajeDesc = 0;
+  let ratingPromedio = 0;
+  let ratingCount = 0;
+  let ventasCount = 0;
 
   if (variantId) {
-    // Obtener precio de la variante
     const [variantRows] = await pool.query(
       `SELECT 
         COALESCE(p.precio_oferta, p.precio_base) as precio,
+        p.precio_base,
+        p.porcentaje_desc,
+        p.rating_promedio,
+        p.rating_count,
+        p.ventas_count,
         pv.precio_extra
        FROM products p
        JOIN product_variants pv ON pv.product_id = p.id
@@ -51,15 +64,32 @@ export const addOrUpdate = async (userId, productId, variantId, cantidad) => {
     if (variantRows.length > 0) {
       precioUnitario = variantRows[0].precio;
       precioExtra = variantRows[0].precio_extra || 0;
+      precioBase = variantRows[0].precio_base || 0;
+      porcentajeDesc = variantRows[0].porcentaje_desc || 0;
+      ratingPromedio = variantRows[0].rating_promedio || 0;
+      ratingCount = variantRows[0].rating_count || 0;
+      ventasCount = variantRows[0].ventas_count || 0;
     }
   } else {
-    // Obtener precio del producto sin variante
     const [productRows] = await pool.query(
-      "SELECT COALESCE(precio_oferta, precio_base) as precio FROM products WHERE id = ?",
+      `SELECT 
+        COALESCE(precio_oferta, precio_base) as precio,
+        precio_base,
+        porcentaje_desc,
+        rating_promedio,
+        rating_count,
+        ventas_count
+       FROM products 
+       WHERE id = ?`,
       [productId],
     );
     if (productRows.length > 0) {
       precioUnitario = productRows[0].precio;
+      precioBase = productRows[0].precio_base || 0;
+      porcentajeDesc = productRows[0].porcentaje_desc || 0;
+      ratingPromedio = productRows[0].rating_promedio || 0;
+      ratingCount = productRows[0].rating_count || 0;
+      ventasCount = productRows[0].ventas_count || 0;
     }
   }
 
@@ -72,17 +102,21 @@ export const addOrUpdate = async (userId, productId, variantId, cantidad) => {
   );
 
   if (existing.length > 0) {
-    // Actualizar sumando cantidad
     const nuevaCantidad = existing[0].cantidad + cantidad;
     await pool.query(
       "UPDATE cart SET cantidad = ?, updated_at = NOW() WHERE id = ?",
       [nuevaCantidad, existing[0].id],
     );
   } else {
-    // ✅ Insertar nuevo con los precios correctos
+    // ✅ Insertar con TODOS los datos
     await pool.query(
-      `INSERT INTO cart (user_id, product_id, variant_id, cantidad, precio_unitario, precio_extra, updated_at) 
-       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO cart (
+        user_id, product_id, variant_id, cantidad, 
+        precio_unitario, precio_extra, 
+        precio_base, porcentaje_desc, 
+        rating_promedio, rating_count, ventas_count,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         userId,
         productId,
@@ -90,6 +124,11 @@ export const addOrUpdate = async (userId, productId, variantId, cantidad) => {
         cantidad,
         precioUnitario,
         precioExtra,
+        precioBase,
+        porcentajeDesc,
+        ratingPromedio,
+        ratingCount,
+        ventasCount,
       ],
     );
   }
