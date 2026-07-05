@@ -32,6 +32,22 @@ export const orderGetOne = async (req, res, next) => {
   }
 };
 
+// ✅ Descarga del comprobante de pedido en PDF
+export const orderComprobante = async (req, res, next) => {
+  try {
+    const { buffer, filename } = await orderSvc.getComprobante(
+      Number(req.params.id),
+      req.user.id,
+      req.user.rol,
+    );
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (e) {
+    next(e);
+  }
+};
+
 export const cancel = async (req, res, next) => {
   try {
     await orderSvc.cancel(Number(req.params.id), req.user.id);

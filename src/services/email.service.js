@@ -17,12 +17,19 @@ const transporter = nodemailer.createTransport({
 });
 
 // ─── Función base de envío ────────────────────────────────────────────────────
-const send = async ({ to, subject, html }) => {
+// ✅ Ahora acepta "attachments" (array de { filename, content } de nodemailer)
+const send = async ({ to, subject, html, attachments }) => {
   if (!MAIL_USER || !MAIL_PASS) {
     console.warn("[Email] Sin configurar — saltando:", subject);
     return;
   }
-  await transporter.sendMail({ from: MAIL_FROM, to, subject, html });
+  await transporter.sendMail({
+    from: MAIL_FROM,
+    to,
+    subject,
+    html,
+    ...(attachments?.length ? { attachments } : {}),
+  });
   console.log(`✅ Email enviado a ${to}: ${subject}`);
 };
 
@@ -164,15 +171,26 @@ export const sendPasswordReset = (email, nombre, token) =>
   });
 
 // ─── 3. Confirmación de pedido ────────────────────────────────────────────────
-export const sendOrderConfirmation = (email, nombre, order) =>
+// ✅ Ahora acepta un 4to parámetro opcional "pdfBuffer" — si se pasa, se
+// adjunta el comprobante de pedido en PDF al correo.
+export const sendOrderConfirmation = (email, nombre, order, pdfBuffer = null) =>
   send({
     to: email,
     subject: `✅ Pedido #${order.codigo_orden} recibido — MirageMart`,
+    attachments: pdfBuffer
+      ? [
+          {
+            filename: `comprobante-${order.codigo_orden}.pdf`,
+            content: pdfBuffer,
+            contentType: "application/pdf",
+          },
+        ]
+      : [],
     html: wrapHTML(
       `
       <div class="body">
         <p class="greeting">¡Hola ${nombre}! 🎉</p>
-        <p class="subtitle">Recibimos tu pedido y está siendo procesado. Te notificaremos cuando sea enviado.</p>
+        <p class="subtitle">Recibimos tu pedido y está siendo procesado. Te notificaremos cuando sea enviado.${pdfBuffer ? " Adjuntamos tu comprobante de pedido en PDF." : ""}</p>
 
         <div class="order-box">
           <div class="order-box-title">Resumen del pedido</div>
@@ -236,7 +254,149 @@ export const sendOrderConfirmation = (email, nombre, order) =>
     ),
   });
 
-// ─── 4. Actualización de estado ───────────────────────────────────────────────
+// ─── 4. Notificación de contacto (a ti, el admin) ─────────────────────────────
+export const sendContactAdminNotification = (nombre, email, mensaje) =>
+  send({
+    to: MAIL_USER,
+    subject: `📩 Nuevo mensaje de contacto — ${nombre}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Nuevo mensaje desde el formulario de contacto</p>
+        <div class="order-box">
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="info-label">Nombre</div>
+              <div class="info-value">${nombre}</div>
+            </div>
+            <div class="info-card">
+              <div class="info-label">Email</div>
+              <div class="info-value">${email}</div>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;">${mensaje}</p>
+        </div>
+        <div class="btn-center">
+          <a href="mailto:${email}" class="btn">Responder a ${nombre} →</a>
+        </div>
+      </div>
+    `,
+      `Nuevo mensaje de contacto — ${nombre}`,
+    ),
+  });
+
+// ─── 5. Confirmación al cliente ───────────────────────────────────────────────
+export const sendContactConfirmation = (nombre, email) =>
+  send({
+    to: email,
+    subject: "✅ Recibimos tu mensaje — MirageMart",
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">¡Hola ${nombre}! 👋</p>
+        <p class="subtitle">
+          Recibimos tu mensaje y nuestro equipo te responderá lo antes posible,
+          normalmente dentro de las próximas 24 horas.
+        </p>
+        <div class="btn-center">
+          <a href="https://wa.me/51907653530" class="whatsapp-btn">
+            💬 ¿Es urgente? Escríbenos por WhatsApp
+          </a>
+        </div>
+      </div>
+    `,
+      "Recibimos tu mensaje — MirageMart",
+    ),
+  });
+
+// ─── 6. Libro de Reclamaciones — constancia al consumidor ─────────────────────
+export const sendLibroReclamacionesConfirmacion = (record, pdfBuffer) =>
+  send({
+    to: record.email,
+    subject: `✅ Constancia de tu ${record.tipo === "reclamo" ? "reclamo" : "queja"} — ${record.codigo}`,
+    attachments: [
+      {
+        filename: `constancia-${record.codigo}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Hola ${record.nombre_completo} 👋</p>
+        <p class="subtitle">
+          Recibimos tu ${record.tipo === "reclamo" ? "reclamo" : "queja"} y adjuntamos tu constancia en PDF.
+          Te responderemos dentro de los próximos 15 días hábiles a este mismo correo.
+        </p>
+        <div class="order-box">
+          <div class="order-box-title">Código de seguimiento</div>
+          <div class="order-code">${record.codigo}</div>
+        </div>
+      </div>
+    `,
+      `Constancia de tu ${record.tipo} — ${record.codigo}`,
+    ),
+  });
+
+// ─── 7. Libro de Reclamaciones — notificación al admin ─────────────────────────
+export const sendLibroReclamacionesAdminNotification = (record) =>
+  send({
+    to: MAIL_USER,
+    subject: `📋 Nuevo ${record.tipo === "reclamo" ? "reclamo" : "queja"} — ${record.codigo}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Nuevo ${record.tipo === "reclamo" ? "reclamo" : "queja"} en el Libro de Reclamaciones</p>
+        <div class="note-box">
+          <p>⏰ Tienes 15 días hábiles para responder desde la fecha de recepción.</p>
+        </div>
+        <div class="order-box">
+          <div class="order-box-title">Código</div>
+          <div class="order-code">${record.codigo}</div>
+          <div class="divider"></div>
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="info-label">Nombre</div>
+              <div class="info-value">${record.nombre_completo}</div>
+            </div>
+            <div class="info-card">
+              <div class="info-label">Email</div>
+              <div class="info-value">${record.email}</div>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;"><strong>Detalle:</strong> ${record.detalle}</p>
+          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;margin-top:8px;"><strong>Pedido:</strong> ${record.pedido_consumidor}</p>
+        </div>
+      </div>
+    `,
+      `Nuevo ${record.tipo} — ${record.codigo}`,
+    ),
+  });
+
+// ─── 8. Libro de Reclamaciones — respuesta al consumidor ───────────────────────
+export const sendLibroReclamacionesRespuesta = (record) =>
+  send({
+    to: record.email,
+    subject: `📬 Respuesta a tu ${record.tipo === "reclamo" ? "reclamo" : "queja"} — ${record.codigo}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Hola ${record.nombre_completo} 👋</p>
+        <p class="subtitle">Aquí tienes nuestra respuesta a tu ${record.tipo === "reclamo" ? "reclamo" : "queja"} con código <strong>${record.codigo}</strong>.</p>
+        <div class="order-box">
+          <div class="order-box-title">Respuesta</div>
+          <p style="font-size:14px;color:#374151;white-space:pre-wrap;line-height:1.6;">${record.respuesta}</p>
+        </div>
+      </div>
+    `,
+      `Respuesta a tu ${record.tipo} — ${record.codigo}`,
+    ),
+  });
+
+// ─── 9. Actualización de estado ───────────────────────────────────────────────
 const STATUS_INFO = {
   pagado: {
     emoji: "✅",

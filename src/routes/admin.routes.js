@@ -59,4 +59,23 @@ router.put("/shipping/:id", ctrl.updateShippingMethod);
 
 router.post("/promos/send", ctrl.sendPromo);
 
+// Mensajes de contacto
+router.get("/contact-messages", ctrl.getContactMessages);
+router.patch("/contact-messages/:id/read", ctrl.markContactMessageRead);
+
+// Libro de reclamaciones
+router.get("/libro-reclamaciones", ctrl.getLibroReclamaciones);
+router.get("/libro-reclamaciones/:id", ctrl.getLibroReclamacionItem);
+router.patch(
+  "/libro-reclamaciones/:id/responder",
+  ctrl.responderLibroReclamacion,
+);
+
+// Newsletter
+router.get("/newsletter-subscribers", ctrl.getNewsletterSubscribers);
+router.patch(
+  "/newsletter-subscribers/:id/status",
+  ctrl.setNewsletterSubscriberStatus,
+);
+
 export default router;

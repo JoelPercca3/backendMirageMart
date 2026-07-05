@@ -1,6 +1,9 @@
 import { pool } from "../config/database.js";
 import { success, created } from "../utils/response.js";
 import { createNotification } from "../services/notification.service.js";
+import * as contactRepo from "../repositories/contact.repository.js";
+import * as libroSvc from "../services/libroReclamaciones.service.js";
+import * as newsletterSvc from "../services/newsletter.service.js";
 
 export const dashboard = async (req, res, next) => {
   try {
@@ -692,6 +695,119 @@ export const sendPromo = async (req, res, next) => {
       message: `Promoción enviada a ${users.length} usuarios`,
       data: { total: users.length },
     });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ── Mensajes de contacto ──────────────────────────────────────────────────
+export const getContactMessages = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 15;
+    const offset = (page - 1) * limit;
+    const search = req.query.search || "";
+    const leido = req.query.leido; // "0" | "1" | undefined (todos)
+
+    const { rows, total } = await contactRepo.getAll({
+      limit,
+      offset,
+      search,
+      leido,
+    });
+
+    res.json({
+      ok: true,
+      data: rows,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const markContactMessageRead = async (req, res, next) => {
+  try {
+    const { leido } = req.body;
+    await contactRepo.markAsRead(req.params.id, leido);
+    res.json({ ok: true, message: "Actualizado" });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ── Libro de reclamaciones ─────────────────────────────────────────────────
+export const getLibroReclamaciones = async (req, res, next) => {
+  try {
+    const result = await libroSvc.getAll(req.query);
+    res.json({
+      ok: true,
+      data: result.data,
+      meta: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const getLibroReclamacionItem = async (req, res, next) => {
+  try {
+    const record = await libroSvc.getOne(Number(req.params.id));
+    success(res, record);
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const responderLibroReclamacion = async (req, res, next) => {
+  try {
+    const { respuesta } = req.body;
+    if (!respuesta || respuesta.trim().length < 5) {
+      return res
+        .status(422)
+        .json({ ok: false, message: "La respuesta es muy corta" });
+    }
+    const updated = await libroSvc.respond(Number(req.params.id), respuesta);
+    success(res, updated, "Respuesta enviada al consumidor");
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ── Newsletter ──────────────────────────────────────────────────────────────
+export const getNewsletterSubscribers = async (req, res, next) => {
+  try {
+    const result = await newsletterSvc.getAll(req.query);
+    res.json({
+      ok: true,
+      data: result.data,
+      meta: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const setNewsletterSubscriberStatus = async (req, res, next) => {
+  try {
+    const { activo } = req.body;
+    await newsletterSvc.setActivo(req.params.id, activo);
+    res.json({ ok: true, message: "Actualizado" });
   } catch (e) {
     next(e);
   }

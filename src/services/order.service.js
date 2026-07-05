@@ -10,6 +10,7 @@ import {
   sendOrderConfirmation,
   sendOrderStatus,
 } from "../services/email.service.js";
+import { generateComprobantePDF } from "../services/comprobante.service.js";
 import {
   notifyOrderCreated,
   notifyOrderCancelled,
@@ -172,12 +173,22 @@ export const create = async (
     // ✅ Obtener orden completa con email y nombre del cliente
     const order = await orderRepo.findById(orderId, userId);
 
-    // ✅ Enviar email de confirmación usando la nueva función
+    // ✅ Generar el comprobante de pedido en PDF (no bloquea la respuesta
+    //    si algo falla — el pedido ya se creó correctamente)
+    let pdfBuffer = null;
+    try {
+      pdfBuffer = await generateComprobantePDF(order);
+    } catch (err) {
+      console.error("Error al generar comprobante PDF:", err);
+    }
+
+    // ✅ Enviar email de confirmación con el comprobante adjunto
     if (order?.cliente_email && order?.cliente_nombre) {
       await sendOrderConfirmation(
         order.cliente_email,
         order.cliente_nombre,
         order,
+        pdfBuffer,
       ).catch((err) =>
         console.error("Error al enviar email de confirmación:", err),
       );
@@ -203,6 +214,14 @@ export const getOne = async (id, userId, rol) => {
   if (rol !== "admin" && order.user_id !== userId)
     throw new AppError("No tienes permiso para ver este pedido", 403);
   return order;
+};
+
+// ✅ Genera el PDF del comprobante bajo demanda, reusando el mismo
+// control de permisos que getOne (dueño del pedido o admin).
+export const getComprobante = async (id, userId, rol) => {
+  const order = await getOne(id, userId, rol);
+  const buffer = await generateComprobantePDF(order);
+  return { buffer, filename: `comprobante-${order.codigo_orden}.pdf` };
 };
 
 export const cancel = async (id, userId) => {

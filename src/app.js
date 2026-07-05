@@ -10,6 +10,9 @@ import { CLIENT_URL, ADMIN_URL, NODE_ENV } from "./config/env.js";
 import { generalLimiter } from "./middlewares/rateLimiter.middleware.js";
 import { errorHandler } from "./middlewares/errorHandler.middleware.js";
 import routes from "./routes/index.js";
+import contactRoutes from "./routes/contact.routes.js";
+import libroReclamacionesRoutes from "./routes/libroReclamaciones.routes.js";
+import newsletterRoutes from "./routes/newsletter.routes.js";
 
 // __dirname equivalente en ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -64,6 +67,9 @@ app.get("/health", (_req, res) =>
 
 // ── API Routes ────────────────────────────────────────────
 app.use("/api/v1", routes);
+app.use("/api/v1/contact", contactRoutes);
+app.use("/api/v1/libro-reclamaciones", libroReclamacionesRoutes);
+app.use("/api/v1/newsletter", newsletterRoutes); // ← NUEVA RUTA
 
 // ── 404 ───────────────────────────────────────────────────
 app.use((req, res) =>
