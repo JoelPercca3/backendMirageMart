@@ -1,6 +1,6 @@
 import { pool } from "../config/database.js";
-// repositories/product.repository.js
 
+// ─── OBTENER TODOS LOS PRODUCTOS ─────────────────────────────────────────────
 export const getAll = async ({
   limit,
   offset,
@@ -8,6 +8,8 @@ export const getAll = async ({
   brand_id,
   min_price,
   max_price,
+  talla,
+  color,
   estado,
   search,
   sort,
@@ -15,322 +17,175 @@ export const getAll = async ({
   let where = "WHERE 1=1";
   const params = [];
 
-  // ✅ BUSCAR CON SINÓNIMOS (recibe términos separados por coma)
-  if (search) {
-    const terminos = search
+  // ─── BÚSQUEDA ──────────────────────────────────────────────────────────────
+  if (search && search.trim()) {
+    const terms = search
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
-
-    console.log("🔍 Términos de búsqueda (admin):", terminos);
-
-    if (terminos.length > 0) {
-      const conditions = terminos
-        .map(
-          () =>
-            "(p.nombre LIKE ? OR p.descripcion LIKE ? OR p.sku LIKE ? OR p.tags LIKE ?)",
-        )
-        .join(" OR ");
-      where += ` AND (${conditions})`;
-      terminos.forEach((t) => {
-        const like = `%${t}%`;
-        params.push(like, like, like, like);
-      });
-    }
+    const searchConditions = terms
+      .map(() => "(p.nombre LIKE ? OR p.descripcion LIKE ? OR p.sku LIKE ?)")
+      .join(" OR ");
+    where += ` AND (${searchConditions})`;
+    terms.forEach((t) => {
+      params.push(`%${t}%`, `%${t}%`, `%${t}%`);
+    });
   }
 
-  // ─── FILTROS ────────────────────────────────────────────────────────────────
-  if (category_id) {
+  // ─── CATEGORY_ID (ARRAY) ──────────────────────────────────────────────────
+  if (category_id && Array.isArray(category_id) && category_id.length > 0) {
+    const placeholders = category_id.map(() => "?").join(", ");
+    where += ` AND p.category_id IN (${placeholders})`;
+    params.push(...category_id);
+  } else if (category_id) {
     where += " AND p.category_id = ?";
     params.push(category_id);
   }
 
+  // ─── BRAND_ID ─────────────────────────────────────────────────────────────
   if (brand_id) {
     where += " AND p.brand_id = ?";
     params.push(brand_id);
   }
 
+  // ─── PRECIO ──────────────────────────────────────────────────────────────
   if (min_price) {
     where += " AND COALESCE(p.precio_oferta, p.precio_base) >= ?";
     params.push(parseFloat(min_price));
   }
-
   if (max_price) {
     where += " AND COALESCE(p.precio_oferta, p.precio_base) <= ?";
     params.push(parseFloat(max_price));
   }
 
-  if (estado !== undefined && estado !== "") {
+  // ─── TALLA (multi-selección) ─────────────────────────────────────────────
+  if (talla) {
+    const tallas = talla.split(",").filter(Boolean);
+    if (tallas.length > 0) {
+      const placeholders = tallas.map(() => "?").join(", ");
+      where += ` AND EXISTS (
+      SELECT 1 FROM product_variants pv
+      WHERE pv.product_id = p.id
+      AND pv.activo = 1
+      AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Talla')) IN (${placeholders})
+    )`;
+      params.push(...tallas);
+    }
+  }
+
+  // ─── COLOR (multi-selección) ─────────────────────────────────────────────
+  if (color) {
+    const colores = color.split(",").filter(Boolean);
+    if (colores.length > 0) {
+      const placeholders = colores.map(() => "?").join(", ");
+      where += ` AND EXISTS (
+      SELECT 1 FROM product_variants pv
+      WHERE pv.product_id = p.id
+      AND pv.activo = 1
+      AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) IN (${placeholders})
+    )`;
+      params.push(...colores);
+    }
+  }
+
+  // ─── ESTADO ──────────────────────────────────────────────────────────────
+  if (estado && estado !== "") {
     where += " AND p.estado = ?";
     params.push(estado);
   }
 
-  // ─── ORDEN ──────────────────────────────────────────────────────────────────
-  let orderBy = "ORDER BY p.id DESC";
+  // ─── ORDER BY ─────────────────────────────────────────────────────────────
+  let orderBy = "p.created_at DESC";
   if (sort) {
-    const [field, direction] = sort.split(":");
-    const dir = direction === "desc" ? "DESC" : "ASC";
-    if (field === "precio") {
-      orderBy = `ORDER BY COALESCE(p.precio_oferta, p.precio_base) ${dir}`;
-    } else if (field === "nombre") {
-      orderBy = `ORDER BY p.nombre ${dir}`;
-    } else if (field === "created_at") {
-      orderBy = `ORDER BY p.created_at ${dir}`;
-    } else if (field === "ventas") {
-      orderBy = `ORDER BY p.ventas_count DESC`;
-    } else if (field === "rating") {
-      orderBy = `ORDER BY p.rating_promedio DESC`;
+    const parts = sort.split(":");
+    const field = parts[0];
+    const direction = parts.length > 1 ? parts[1] : "asc";
+    const allowedFields = [
+      "precio_base",
+      "precio_oferta",
+      "created_at",
+      "ventas_count",
+      "rating_promedio",
+    ];
+    if (
+      allowedFields.includes(field) &&
+      ["asc", "desc"].includes(direction.toLowerCase())
+    ) {
+      if (field === "ventas_count") {
+        orderBy = `ventas_count ${direction}`;
+      } else if (field === "precio_base" || field === "precio_oferta") {
+        orderBy = `COALESCE(p.precio_oferta, p.precio_base) ${direction}`;
+      } else {
+        orderBy = `p.${field} ${direction}`;
+      }
     }
   }
 
-  // ─── COUNT ──────────────────────────────────────────────────────────────────
+  // ─── CONTAR TOTAL ──────────────────────────────────────────────────────────
   const [[{ total }]] = await pool.query(
     `SELECT COUNT(*) as total FROM products p ${where}`,
     params,
   );
 
-  // ─── QUERY ──────────────────────────────────────────────────────────────────
+  // ─── QUERY PRINCIPAL ──────────────────────────────────────────────────────
   const [rows] = await pool.query(
-    `SELECT 
-      p.*,
-      c.nombre as categoria,
-      b.nombre as marca,
-      (
-        SELECT COUNT(*)
-        FROM order_items
-        WHERE product_id = p.id
-      ) as ventas_count
+    `SELECT p.*,
+            c.nombre as categoria,
+            b.nombre as marca,
+            (SELECT COUNT(*) FROM order_items WHERE product_id = p.id) as ventas_count
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
      LEFT JOIN brands b ON p.brand_id = b.id
      ${where}
-     ${orderBy}
+     ORDER BY ${orderBy}
      LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
 
-  // ─── IMÁGENES ──────────────────────────────────────────────────────────────
+  // ─── ADJUNTAR IMÁGENES ──────────────────────────────────────────────────
   if (rows.length > 0) {
-    const productIds = rows.map((row) => row.id);
+    const productIds = rows.map((r) => r.id);
     const [allImages] = await pool.query(
-      `SELECT product_id, id, url, variant_id, es_principal, orden, alt_text
-       FROM product_images
-       WHERE product_id IN (?)
-       ORDER BY product_id, variant_id IS NULL DESC, variant_id, orden`,
+      `SELECT pi.product_id, pi.id, pi.url, pi.variant_id, pi.es_principal, pi.orden, pi.alt_text,
+          JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) as variant_color
+   FROM product_images pi
+   LEFT JOIN product_variants pv ON pi.variant_id = pv.id
+   WHERE pi.product_id IN (?)
+   ORDER BY pi.product_id, pi.variant_id IS NULL DESC, pi.variant_id, pi.orden`,
       [productIds],
     );
-
     const imagesMap = {};
     allImages.forEach((img) => {
-      if (!imagesMap[img.product_id]) {
-        imagesMap[img.product_id] = [];
-      }
-      imagesMap[img.product_id].push({
-        id: img.id,
-        url: img.url,
-        variant_id: img.variant_id,
-        es_principal: img.es_principal,
-        orden: img.orden,
-        alt_text: img.alt_text,
-      });
+      if (!imagesMap[img.product_id]) imagesMap[img.product_id] = [];
+      imagesMap[img.product_id].push(img);
     });
-
     rows.forEach((row) => {
       row.images = imagesMap[row.id] || [];
-    });
-  } else {
-    rows.forEach((row) => {
-      row.images = [];
     });
   }
 
   return { rows, total };
 };
-export const findById = async (id) => {
+
+// ─── OBTENER PRODUCTOS DESTACADOS ──────────────────────────────────────────
+export const getFeatured = async (limit = 12) => {
   const [rows] = await pool.query(
     `SELECT p.*,
-            c.nombre as categoria, c.slug as categoria_slug,
-            b.nombre as marca, b.logo_url as marca_logo
+            c.nombre as categoria,
+            b.nombre as marca,
+            (SELECT COUNT(*) FROM order_items WHERE product_id = p.id) as ventas_count
      FROM products p
      LEFT JOIN categories c ON p.category_id = c.id
      LEFT JOIN brands b ON p.brand_id = b.id
-     WHERE p.id = ? LIMIT 1`,
-    [id],
-  );
-  if (!rows[0]) return null;
-
-  // ✅ CORREGIDO: Orden: primero imágenes base, luego por variante
-  const [images] = await pool.query(
-    `SELECT id, url, alt_text, es_principal, orden, variant_id 
-     FROM product_images 
-     WHERE product_id = ? 
-     ORDER BY variant_id IS NULL DESC, variant_id, orden`,
-    [id],
-  );
-
-  const [attrs] = await pool.query(
-    "SELECT atributo, valor FROM product_attributes WHERE product_id = ?",
-    [id],
-  );
-
-  const [variants] = await pool.query(
-    "SELECT id, sku_variante, opciones, precio_extra, stock, imagen_url FROM product_variants WHERE product_id = ? AND activo = 1",
-    [id],
-  );
-
-  pool.query(
-    "UPDATE products SET vistas_count = vistas_count + 1 WHERE id = ?",
-    [id],
-  );
-
-  return { ...rows[0], images, atributos: attrs, variants };
-};
-
-export const findBySlug = async (slug) => {
-  const [rows] = await pool.query(
-    "SELECT id FROM products WHERE slug = ? LIMIT 1",
-    [slug],
-  );
-  return rows[0] || null;
-};
-
-export const create = async (data) => {
-  const {
-    nombre,
-    slug,
-    descripcion,
-    descripcion_corta,
-    category_id,
-    brand_id,
-    precio_base,
-    precio_oferta,
-    sku,
-    stock_total,
-    peso_kg,
-    estado,
-    es_destacado,
-    es_nuevo,
-    tags,
-  } = data;
-  const [result] = await pool.query(
-    `INSERT INTO products (nombre, slug, descripcion, descripcion_corta, category_id, brand_id,
-      precio_base, precio_oferta, sku, stock_total, peso_kg, estado, es_destacado, es_nuevo, tags)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      nombre,
-      slug,
-      descripcion,
-      descripcion_corta,
-      category_id,
-      brand_id,
-      precio_base,
-      precio_oferta || null,
-      sku,
-      stock_total,
-      peso_kg || null,
-      estado,
-      es_destacado ? 1 : 0,
-      es_nuevo ? 1 : 0,
-      tags ? JSON.stringify(tags) : null,
-    ],
-  );
-  return result.insertId;
-};
-
-export const update = async (id, data) => {
-  const allowed = [
-    "nombre",
-    "slug",
-    "descripcion",
-    "descripcion_corta",
-    "category_id",
-    "brand_id",
-    "precio_base",
-    "precio_oferta",
-    "sku",
-    "stock_total",
-    "peso_kg",
-    "estado",
-    "es_destacado",
-    "es_nuevo",
-    "tags",
-  ];
-  const sets = [];
-  const values = [];
-  for (const [k, v] of Object.entries(data)) {
-    if (allowed.includes(k)) {
-      sets.push(`${k} = ?`);
-      values.push(k === "tags" ? JSON.stringify(v) : v);
-    }
-  }
-  if (!sets.length) return false;
-  values.push(id);
-  await pool.query(
-    `UPDATE products SET ${sets.join(", ")} WHERE id = ?`,
-    values,
-  );
-  return true;
-};
-
-export const remove = async (id) => {
-  const [result] = await pool.query("DELETE FROM products WHERE id = ?", [id]);
-  return result.affectedRows > 0;
-};
-
-export const getFeatured = async (limit = 12) => {
-  const [rows] = await pool.query(
-    `SELECT p.id, p.nombre, p.slug,
-            COALESCE(p.precio_oferta, p.precio_base) as precio_final,
-            p.precio_base, p.precio_oferta, p.porcentaje_desc, p.rating_promedio
-     FROM products p
-     WHERE p.estado = 'activo' AND p.es_destacado = 1
-     ORDER BY p.ventas_count DESC LIMIT ?`,
+     WHERE p.estado = 'activo'
+       AND p.es_destacado = 1
+     ORDER BY p.created_at DESC
+     LIMIT ?`,
     [limit],
   );
 
   if (rows.length > 0) {
-    const productIds = rows.map((row) => row.id);
-    const [allImages] = await pool.query(
-      `SELECT product_id, id, url, variant_id, es_principal, orden
-       FROM product_images
-       WHERE product_id IN (?)
-       ORDER BY product_id, variant_id IS NULL DESC, variant_id, orden`,
-      [productIds],
-    );
-
-    const imagesMap = {};
-    allImages.forEach((img) => {
-      if (!imagesMap[img.product_id]) imagesMap[img.product_id] = [];
-      imagesMap[img.product_id].push({
-        id: img.id,
-        url: img.url,
-        variant_id: img.variant_id,
-        es_principal: img.es_principal,
-        orden: img.orden,
-      });
-    });
-
-    rows.forEach((row) => {
-      row.images = imagesMap[row.id] || [];
-    });
-  }
-
-  return rows;
-};
-
-export const getRelated = async (productId, categoryId, limit = 8) => {
-  const [rows] = await pool.query(
-    `SELECT p.id, p.nombre, p.slug,
-            COALESCE(p.precio_oferta, p.precio_base) as precio_final,
-            p.precio_base, p.precio_oferta, p.porcentaje_desc, p.rating_promedio
-     FROM products p
-     WHERE p.category_id = ? AND p.id != ? AND p.estado = 'activo'
-     ORDER BY p.ventas_count DESC LIMIT ?`,
-    [categoryId, productId, limit],
-  );
-
-  if (rows.length > 0) {
-    const productIds = rows.map((row) => row.id);
+    const productIds = rows.map((r) => r.id);
     const [allImages] = await pool.query(
       `SELECT product_id, id, url, variant_id, es_principal, orden, alt_text
        FROM product_images
@@ -338,22 +193,11 @@ export const getRelated = async (productId, categoryId, limit = 8) => {
        ORDER BY product_id, variant_id IS NULL DESC, variant_id, orden`,
       [productIds],
     );
-
     const imagesMap = {};
     allImages.forEach((img) => {
-      if (!imagesMap[img.product_id]) {
-        imagesMap[img.product_id] = [];
-      }
-      imagesMap[img.product_id].push({
-        id: img.id,
-        url: img.url,
-        variant_id: img.variant_id,
-        es_principal: img.es_principal,
-        orden: img.orden,
-        alt_text: img.alt_text,
-      });
+      if (!imagesMap[img.product_id]) imagesMap[img.product_id] = [];
+      imagesMap[img.product_id].push(img);
     });
-
     rows.forEach((row) => {
       row.images = imagesMap[row.id] || [];
     });
@@ -362,10 +206,240 @@ export const getRelated = async (productId, categoryId, limit = 8) => {
   return rows;
 };
 
-export const updateStock = async (id, cantidad, conn = pool) => {
-  const [result] = await conn.query(
-    "UPDATE products SET stock_total = stock_total - ? WHERE id = ? AND stock_total >= ?",
-    [cantidad, id, cantidad],
+// ─── OBTENER PRODUCTOS POR ID ──────────────────────────────────────────────
+export const findById = async (id) => {
+  const [rows] = await pool.query(
+    `SELECT p.*,
+            c.nombre as categoria,
+            b.nombre as marca,
+            (SELECT COUNT(*) FROM order_items WHERE product_id = p.id) as ventas_count
+     FROM products p
+     LEFT JOIN categories c ON p.category_id = c.id
+     LEFT JOIN brands b ON p.brand_id = b.id
+     WHERE p.id = ?`,
+    [id],
   );
+
+  if (rows.length === 0) return null;
+
+  const product = rows[0];
+
+  // ─── Obtener imágenes ──────────────────────────────────────────────────
+  const [images] = await pool.query(
+    `SELECT id, url, variant_id, es_principal, orden, alt_text
+     FROM product_images
+     WHERE product_id = ?
+     ORDER BY variant_id IS NULL DESC, variant_id, orden`,
+    [id],
+  );
+  product.images = images;
+
+  // ─── Obtener variantes ──────────────────────────────────────────────────
+  const [variants] = await pool.query(
+    `SELECT id, 
+            sku_variante, 
+            opciones, 
+            precio_extra, 
+            stock, 
+            imagen_url,
+            activo
+     FROM product_variants
+     WHERE product_id = ?`,
+    [id],
+  );
+  product.variants = variants;
+
+  return product;
+};
+
+// ─── OBTENER POR SLUG ──────────────────────────────────────────────────────
+export const findBySlug = async (slug) => {
+  const [rows] = await pool.query("SELECT * FROM products WHERE slug = ?", [
+    slug,
+  ]);
+  return rows[0] || null;
+};
+
+// ─── OBTENER PRODUCTOS RELACIONADOS ────────────────────────────────────────
+export const getRelated = async (productId, categoryId, limit = 8) => {
+  const [rows] = await pool.query(
+    `SELECT p.*,
+            c.nombre as categoria,
+            b.nombre as marca,
+            (SELECT COUNT(*) FROM order_items WHERE product_id = p.id) as ventas_count
+     FROM products p
+     LEFT JOIN categories c ON p.category_id = c.id
+     LEFT JOIN brands b ON p.brand_id = b.id
+     WHERE p.id != ?
+       AND p.category_id = ?
+       AND p.estado = 'activo'
+     ORDER BY p.ventas_count DESC, p.rating_promedio DESC
+     LIMIT ?`,
+    [productId, categoryId, limit],
+  );
+
+  if (rows.length > 0) {
+    const productIds = rows.map((r) => r.id);
+    const [allImages] = await pool.query(
+      `SELECT product_id, id, url, variant_id, es_principal, orden, alt_text
+       FROM product_images
+       WHERE product_id IN (?)
+       ORDER BY product_id, variant_id IS NULL DESC, variant_id, orden`,
+      [productIds],
+    );
+    const imagesMap = {};
+    allImages.forEach((img) => {
+      if (!imagesMap[img.product_id]) imagesMap[img.product_id] = [];
+      imagesMap[img.product_id].push(img);
+    });
+    rows.forEach((row) => {
+      row.images = imagesMap[row.id] || [];
+    });
+  }
+
+  return rows;
+};
+
+// ─── OBTENER OPCIONES DE FILTRO ─────────────────────────────────────────────
+export const getFilterOptions = async () => {
+  // Marcas: solo productos activos
+  const [brands] = await pool.query(`
+    SELECT DISTINCT b.id, b.nombre
+    FROM brands b
+    INNER JOIN products p ON p.brand_id = b.id
+    WHERE p.estado = 'activo'
+    ORDER BY b.nombre
+  `);
+
+  // Tallas: solo variantes activas de productos activos
+  const [tallasRaw] = await pool.query(`
+    SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Talla')) as talla
+    FROM product_variants pv
+    INNER JOIN products p ON p.id = pv.product_id
+    WHERE pv.activo = 1
+      AND p.estado = 'activo'
+      AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Talla')) IS NOT NULL
+  `);
+  const tallas = tallasRaw.map((row) => row.talla).filter(Boolean);
+
+  // Colores: solo variantes activas de productos activos
+  const [coloresRaw] = await pool.query(`
+    SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) as color
+    FROM product_variants pv
+    INNER JOIN products p ON p.id = pv.product_id
+    WHERE pv.activo = 1
+      AND p.estado = 'activo'
+      AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) IS NOT NULL
+  `);
+  const colores = coloresRaw.map((row) => row.color).filter(Boolean);
+
+  return {
+    marcas: brands,
+    tallas,
+    colores,
+  };
+};
+
+// ─── CREAR PRODUCTO ──────────────────────────────────────────────────────────
+export const create = async (data) => {
+  const {
+    category_id,
+    brand_id,
+    nombre,
+    slug,
+    descripcion,
+    descripcion_corta,
+    precio_base,
+    precio_oferta,
+    porcentaje_desc,
+    sku,
+    stock_total,
+    peso_kg,
+    dimensiones,
+    tags,
+    estado = "borrador",
+    es_destacado = 0,
+    es_nuevo = 0,
+  } = data;
+
+  const [result] = await pool.query(
+    `INSERT INTO products (
+      category_id, brand_id, nombre, slug, descripcion, descripcion_corta,
+      precio_base, precio_oferta, porcentaje_desc, sku, stock_total,
+      peso_kg, dimensiones, tags, estado, es_destacado, es_nuevo
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      category_id,
+      brand_id,
+      nombre,
+      slug,
+      descripcion,
+      descripcion_corta,
+      precio_base,
+      precio_oferta,
+      porcentaje_desc,
+      sku,
+      stock_total,
+      peso_kg,
+      dimensiones,
+      tags,
+      estado,
+      es_destacado,
+      es_nuevo,
+    ],
+  );
+
+  return result.insertId;
+};
+
+// ─── ACTUALIZAR PRODUCTO ────────────────────────────────────────────────────
+export const update = async (id, data) => {
+  const fields = [];
+  const values = [];
+
+  const allowedFields = [
+    "category_id",
+    "brand_id",
+    "nombre",
+    "slug",
+    "descripcion",
+    "descripcion_corta",
+    "precio_base",
+    "precio_oferta",
+    "porcentaje_desc",
+    "sku",
+    "stock_total",
+    "peso_kg",
+    "dimensiones",
+    "tags",
+    "estado",
+    "es_destacado",
+    "es_nuevo",
+  ];
+
+  for (const key of allowedFields) {
+    if (data[key] !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(data[key]);
+    }
+  }
+
+  if (fields.length === 0) return true;
+
+  values.push(id);
+  const [result] = await pool.query(
+    `UPDATE products SET ${fields.join(", ")} WHERE id = ?`,
+    values,
+  );
+
+  return result.affectedRows > 0;
+};
+
+// ─── ELIMINAR PRODUCTO ──────────────────────────────────────────────────────
+export const remove = async (id) => {
+  await pool.query("DELETE FROM product_images WHERE product_id = ?", [id]);
+  await pool.query("DELETE FROM product_variants WHERE product_id = ?", [id]);
+
+  const [result] = await pool.query("DELETE FROM products WHERE id = ?", [id]);
   return result.affectedRows > 0;
 };

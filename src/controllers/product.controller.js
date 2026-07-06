@@ -10,6 +10,15 @@ export const getAll = async (req, res, next) => {
   }
 };
 
+// ✅ Opciones disponibles para el sidebar de filtros (talla, color, marca)
+export const getFilterOptions = async (req, res, next) => {
+  try {
+    success(res, await productSvc.getFilterOptions());
+  } catch (e) {
+    next(e);
+  }
+};
+
 export const getOne = async (req, res, next) => {
   try {
     const product = await productSvc.getOne(Number(req.params.id));

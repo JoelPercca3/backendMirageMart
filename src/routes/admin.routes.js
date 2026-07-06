@@ -78,4 +78,8 @@ router.patch(
   ctrl.setNewsletterSubscriberStatus,
 );
 
+// Marcas
+router.get("/brands", ctrl.getBrands);
+router.post("/brands", ctrl.createBrand);
+
 export default router;

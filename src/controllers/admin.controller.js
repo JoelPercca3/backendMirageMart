@@ -812,3 +812,47 @@ export const setNewsletterSubscriberStatus = async (req, res, next) => {
     next(e);
   }
 };
+
+// ── Marcas ──────────────────────────────────────────────────────────────────
+export const getBrands = async (req, res, next) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM brands ORDER BY nombre");
+    res.json({ ok: true, data: rows });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const createBrand = async (req, res, next) => {
+  try {
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) {
+      return res
+        .status(422)
+        .json({ ok: false, message: "El nombre de la marca es requerido" });
+    }
+
+    const [existing] = await pool.query(
+      "SELECT id, nombre FROM brands WHERE nombre = ?",
+      [nombre.trim()],
+    );
+    if (existing.length > 0) {
+      return res.json({
+        ok: true,
+        data: existing[0],
+        message: "La marca ya existía",
+      });
+    }
+
+    const [r] = await pool.query("INSERT INTO brands (nombre) VALUES (?)", [
+      nombre.trim(),
+    ]);
+    res.json({
+      ok: true,
+      data: { id: r.insertId, nombre: nombre.trim() },
+      message: "Marca creada",
+    });
+  } catch (e) {
+    next(e);
+  }
+};

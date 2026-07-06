@@ -1,5 +1,3 @@
-// services/product.service.js
-
 import * as productRepo from "../repositories/product.repository.js";
 import { AppError } from "../middlewares/errorHandler.middleware.js";
 import { getPagination } from "../utils/paginate.js";
@@ -90,14 +88,46 @@ const SINONIMOS = {
   cartera: ["bolso", "bolsa", "wallet"],
 };
 
-// ─── Función para expandir términos de búsqueda con sinónimos ──────────────
+// ─── Orden natural de tallas ──────────────────────────────────────────────────
+const TALLA_ORDER = [
+  "XS",
+  "S",
+  "M",
+  "L",
+  "XL",
+  "XXL",
+  "XXXL",
+  "28",
+  "29",
+  "30",
+  "31",
+  "32",
+  "33",
+  "34",
+  "35",
+  "36",
+  "37",
+  "38",
+  "39",
+  "40",
+];
+
+const sortTallas = (tallas) => {
+  return [...tallas].sort((a, b) => {
+    const ia = TALLA_ORDER.indexOf(a);
+    const ib = TALLA_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+};
+
+// ─── Helper: expandir términos de búsqueda con sinónimos ──────────────────
 function expandirTerminos(q) {
   if (!q || q.trim().length < 2) return [q?.trim() || ""];
-
   const termino = q.toLowerCase().trim();
   const sinonimos = SINONIMOS[termino] ?? [];
-
-  // También buscar si el término es sinónimo de otro
   const extra = [];
   for (const [key, synonyms] of Object.entries(SINONIMOS)) {
     if (synonyms.includes(termino)) {
@@ -105,33 +135,56 @@ function expandirTerminos(q) {
       extra.push(...synonyms);
     }
   }
-
   return [...new Set([termino, ...sinonimos, ...extra])];
 }
 
-// ─── Service: Obtener todos los productos (admin) ──────────────────────────
+// ─── Helper: expandir category_id a [padre, ...hijas] ──────────────────────
+async function expandCategoryIds(category_id) {
+  if (!category_id) return null;
+  const [children] = await pool.query(
+    "SELECT id FROM categories WHERE parent_id = ?",
+    [category_id],
+  );
+  return [Number(category_id), ...children.map((c) => c.id)];
+}
+
+// ─── Service: Obtener todos los productos ────────────────────────────────────
 export const getAll = async (query) => {
   const { page, limit, offset } = getPagination(query);
-  const { category_id, brand_id, min_price, max_price, estado, search, sort } =
-    query;
+  const {
+    category_id,
+    brand_id,
+    min_price,
+    max_price,
+    talla,
+    color,
+    estado,
+    search,
+    sort,
+  } = query;
 
-  const estadoFilter = estado === "" ? undefined : estado;
+  const estadoFilter = estado || "activo";
 
-  // ✅ SI HAY BÚSQUEDA, EXPANDIR TÉRMINOS CON SINÓNIMOS
   let expandedSearch = search;
   if (search && search.trim().length >= 2) {
     const terminos = expandirTerminos(search.trim());
-    expandedSearch = terminos.join(","); // Unir términos para el repo
-    console.log("🔍 Búsqueda expandida (admin):", terminos);
+    expandedSearch = terminos.join(",");
+  }
+
+  let expandedCategoryIds = null;
+  if (category_id) {
+    expandedCategoryIds = await expandCategoryIds(category_id);
   }
 
   const { rows, total } = await productRepo.getAll({
     limit,
     offset,
-    category_id,
+    category_id: expandedCategoryIds,
     brand_id,
     min_price,
     max_price,
+    talla,
+    color,
     estado: estadoFilter,
     search: expandedSearch,
     sort,
@@ -148,7 +201,18 @@ export const getOne = async (id) => {
 };
 
 // ─── Service: Obtener productos destacados ──────────────────────────────────
-export const getFeatured = () => productRepo.getFeatured(12);
+export const getFeatured = async () => {
+  return productRepo.getFeatured(12);
+};
+
+// ─── Service: Opciones disponibles para los filtros ────────────────────────
+export const getFilterOptions = async () => {
+  const options = await productRepo.getFilterOptions();
+  return {
+    ...options,
+    tallas: sortTallas(options.tallas),
+  };
+};
 
 // ─── Service: Búsqueda pública con sinónimos ────────────────────────────────
 export const search = async (q, query) => {
@@ -160,23 +224,111 @@ export const search = async (q, query) => {
   }
 
   const { page, limit, offset } = getPagination(query);
+  const {
+    category_id,
+    brand_id,
+    min_price,
+    max_price,
+    talla,
+    color,
+    sort,
+    estado,
+  } = query;
   const terminos = expandirTerminos(q.trim());
 
-  console.log("🔍 Términos expandidos (búsqueda pública):", terminos);
-
-  // Construir búsqueda con todos los términos (OR entre sinónimos)
+  // ─── CONSTRUIR WHERE ──────────────────────────────────────────────────────
   const conditions = terminos
     .map(() => "(p.nombre LIKE ? OR p.descripcion LIKE ? OR p.sku LIKE ?)")
     .join(" OR ");
-  const searchParams = terminos.flatMap((t) => [`%${t}%`, `%${t}%`, `%${t}%`]);
+  const params = terminos.flatMap((t) => [`%${t}%`, `%${t}%`, `%${t}%`]);
 
-  const where = `WHERE (${conditions})`;
+  let where = `WHERE (${conditions})`;
 
+  // ─── FILTROS ──────────────────────────────────────────────────────────────
+  if (estado && estado !== "") {
+    where += " AND p.estado = ?";
+    params.push(estado);
+  }
+
+  if (category_id) {
+    const categoryIds = await expandCategoryIds(category_id);
+    const placeholders = categoryIds.map(() => "?").join(", ");
+    where += ` AND p.category_id IN (${placeholders})`;
+    params.push(...categoryIds);
+  }
+
+  if (brand_id) {
+    where += " AND p.brand_id = ?";
+    params.push(brand_id);
+  }
+  if (min_price) {
+    where += " AND COALESCE(p.precio_oferta, p.precio_base) >= ?";
+    params.push(parseFloat(min_price));
+  }
+  if (max_price) {
+    where += " AND COALESCE(p.precio_oferta, p.precio_base) <= ?";
+    params.push(parseFloat(max_price));
+  }
+  if (talla) {
+    const tallas = talla.split(",").filter(Boolean);
+    if (tallas.length > 0) {
+      const placeholders = tallas.map(() => "?").join(", ");
+      where += ` AND EXISTS (
+      SELECT 1 FROM product_variants pv
+      WHERE pv.product_id = p.id AND pv.activo = 1
+      AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Talla')) IN (${placeholders})
+    )`;
+      params.push(...tallas);
+    }
+  }
+
+  if (color) {
+    const colores = color.split(",").filter(Boolean);
+    if (colores.length > 0) {
+      const placeholders = colores.map(() => "?").join(", ");
+      where += ` AND EXISTS (
+      SELECT 1 FROM product_variants pv
+      WHERE pv.product_id = p.id AND pv.activo = 1
+      AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) IN (${placeholders})
+    )`;
+      params.push(...colores);
+    }
+  }
+
+  // ─── ORDER BY ────────────────────────────────────────────────────────────
+  let orderBy = "p.ventas_count DESC, p.rating_promedio DESC";
+  if (sort) {
+    const parts = sort.split(":");
+    const field = parts[0];
+    const direction = parts.length > 1 ? parts[1] : "asc";
+    const allowedFields = [
+      "precio_base",
+      "precio_oferta",
+      "created_at",
+      "ventas_count",
+      "rating_promedio",
+    ];
+    if (
+      allowedFields.includes(field) &&
+      ["asc", "desc"].includes(direction.toLowerCase())
+    ) {
+      if (field === "ventas_count") {
+        orderBy = `ventas_count ${direction}`;
+      } else if (field === "precio_base" || field === "precio_oferta") {
+        orderBy = `COALESCE(p.precio_oferta, p.precio_base) ${direction}`;
+      } else {
+        orderBy = `p.${field} ${direction}`;
+      }
+    }
+  }
+
+  // ─── COUNT ────────────────────────────────────────────────────────────────
   const [[{ total }]] = await pool.query(
     `SELECT COUNT(*) as total FROM products p ${where}`,
-    searchParams,
+    params,
   );
 
+  // ─── QUERY PRINCIPAL ──────────────────────────────────────────────────────
   const [rows] = await pool.query(
     `SELECT p.*,
             c.nombre as categoria,
@@ -186,19 +338,21 @@ export const search = async (q, query) => {
      LEFT JOIN categories c ON p.category_id = c.id
      LEFT JOIN brands b ON p.brand_id = b.id
      ${where}
-     ORDER BY p.ventas_count DESC, p.rating_promedio DESC
+     ORDER BY ${orderBy}
      LIMIT ? OFFSET ?`,
-    [...searchParams, limit, offset],
+    [...params, limit, offset],
   );
 
-  // Adjuntar imágenes
+  // ─── IMÁGENES ─────────────────────────────────────────────────────────────
   if (rows.length > 0) {
     const productIds = rows.map((r) => r.id);
     const [allImages] = await pool.query(
-      `SELECT product_id, id, url, variant_id, es_principal, orden, alt_text
-       FROM product_images
-       WHERE product_id IN (?)
-       ORDER BY product_id, variant_id IS NULL DESC, variant_id, orden`,
+      `SELECT pi.product_id, pi.id, pi.url, pi.variant_id, pi.es_principal, pi.orden, pi.alt_text,
+          JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) as variant_color
+   FROM product_images pi
+   LEFT JOIN product_variants pv ON pi.variant_id = pv.id
+   WHERE pi.product_id IN (?)
+   ORDER BY pi.product_id, pi.variant_id IS NULL DESC, pi.variant_id, pi.orden`,
       [productIds],
     );
     const imagesMap = {};

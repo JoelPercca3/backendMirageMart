@@ -13,19 +13,46 @@ export const getProfile = async (req, res, next) => {
     next(e);
   }
 };
+
 export const updateProfile = async (req, res, next) => {
   try {
-    const { nombre, telefono, avatar_url } = req.body;
-    await userRepo.update(req.user.id, { nombre, telefono, avatar_url });
-    success(res, null, "Perfil actualizado");
+    // 👇 AGREGAR: tipo_documento, numero_documento
+    const { nombre, telefono, tipo_documento, numero_documento, avatar_url } =
+      req.body;
+    await userRepo.update(req.user.id, {
+      nombre,
+      telefono,
+      tipo_documento, // 👈 NUEVO
+      numero_documento, // 👈 NUEVO
+      avatar_url,
+    });
+
+    // 👇 OBTÉN EL USUARIO ACTUALIZADO PARA DEVOLVERLO
+    const updatedUser = await userRepo.findById(req.user.id);
+    success(res, updatedUser, "Perfil actualizado");
   } catch (e) {
     next(e);
   }
 };
+// Reglas de complejidad de contraseña — deben coincidir con el checklist
+// que se muestra en el frontend (ChangePasswordModal.jsx), para que el
+// usuario nunca vea una regla ahí que el backend no esté realmente aplicando.
+function validatePasswordStrength(password) {
+  if (!password || password.length < 8) return "Mínimo 8 caracteres";
+  if (!/[A-Z]/.test(password)) return "Debe incluir al menos 1 mayúscula";
+  if (!/[a-z]/.test(password)) return "Debe incluir al menos 1 minúscula";
+  if (!/[0-9]/.test(password)) return "Debe incluir al menos 1 número";
+  if (/\s/.test(password)) return "No debe contener espacios";
+  return null;
+}
 
 export const changePassword = async (req, res, next) => {
   try {
     const { current_password, new_password } = req.body;
+
+    const passwordError = validatePasswordStrength(new_password);
+    if (passwordError) throw new AppError(passwordError, 400);
+
     const [rows] = await pool.query(
       "SELECT password_hash FROM users WHERE id = ?",
       [req.user.id],
@@ -37,6 +64,40 @@ export const changePassword = async (req, res, next) => {
       password_hash: await bcrypt.hash(new_password, BCRYPT_ROUNDS),
     });
     success(res, null, "Contraseña actualizada");
+  } catch (e) {
+    next(e);
+  }
+};
+
+// Soft-delete: desactiva la cuenta y anonimiza datos personales,
+// pero mantiene el email intacto (no se libera para reutilizar).
+// No se borra el registro (evita romper FK de orders/payments/etc.).
+export const deleteAccount = async (req, res, next) => {
+  try {
+    const { password } = req.body;
+    const [rows] = await pool.query(
+      "SELECT password_hash FROM users WHERE id = ?",
+      [req.user.id],
+    );
+    if (!rows[0]) return error(res, "Usuario no encontrado", 404);
+
+    const valid = await bcrypt.compare(password, rows[0].password_hash);
+    if (!valid) throw new AppError("La contraseña es incorrecta", 400);
+
+    await pool.query(
+      `UPDATE users SET
+        activo = 0,
+        nombre = 'Usuario eliminado',
+        telefono = NULL,
+        avatar_url = NULL,
+        token_verificacion = NULL,
+        token_reset_password = NULL,
+        token_reset_expires = NULL
+       WHERE id = ?`,
+      [req.user.id],
+    );
+
+    success(res, null, "Cuenta eliminada");
   } catch (e) {
     next(e);
   }

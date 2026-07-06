@@ -7,6 +7,7 @@ const router = Router();
 router.get("/profile", authJWT, ctrl.getProfile);
 router.put("/profile", authJWT, ctrl.updateProfile);
 router.put("/change-password", authJWT, ctrl.changePassword);
+router.post("/delete-account", authJWT, ctrl.deleteAccount);
 router.get("/addresses", authJWT, ctrl.getAddresses);
 router.post("/addresses", authJWT, ctrl.addAddress);
 router.put("/addresses/:id", authJWT, ctrl.updateAddress);

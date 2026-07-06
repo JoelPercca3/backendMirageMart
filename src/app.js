@@ -5,6 +5,7 @@ import morgan from "morgan";
 import compression from "compression";
 import path from "path";
 import { fileURLToPath } from "url";
+import cardRoutes from "./routes/card.routes.js";
 
 import { CLIENT_URL, ADMIN_URL, NODE_ENV } from "./config/env.js";
 import { generalLimiter } from "./middlewares/rateLimiter.middleware.js";
@@ -70,6 +71,7 @@ app.use("/api/v1", routes);
 app.use("/api/v1/contact", contactRoutes);
 app.use("/api/v1/libro-reclamaciones", libroReclamacionesRoutes);
 app.use("/api/v1/newsletter", newsletterRoutes); // ← NUEVA RUTA
+app.use("/api/v1/cards", cardRoutes);
 
 // ── 404 ───────────────────────────────────────────────────
 app.use((req, res) =>

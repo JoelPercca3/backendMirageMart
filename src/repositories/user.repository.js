@@ -10,7 +10,8 @@ export const findByEmail = async (email) => {
 
 export const findById = async (id) => {
   const [rows] = await pool.query(
-    "SELECT id, nombre, email, telefono, avatar_url, rol, activo, email_verificado, created_at FROM users WHERE id = ? LIMIT 1",
+    // 👇 AGREGAR: tipo_documento, numero_documento
+    "SELECT id, nombre, email, telefono, tipo_documento, numero_documento, avatar_url, rol, activo, email_verificado, created_at FROM users WHERE id = ? LIMIT 1",
     [id],
   );
   return rows[0] || null;
@@ -35,6 +36,8 @@ export const update = async (id, fields) => {
   const allowed = [
     "nombre",
     "telefono",
+    "tipo_documento", // 👈 NUEVO
+    "numero_documento", // 👈 NUEVO
     "avatar_url",
     "password_hash",
     "activo",
