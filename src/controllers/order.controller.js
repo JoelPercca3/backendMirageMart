@@ -94,9 +94,24 @@ export const orderUpdateTracking = async (req, res, next) => {
     await orderSvc.updateTracking(
       Number(req.params.id),
       req.body.tracking_number,
+      req.body.courier,
+      req.body.clave_recojo,
     );
     success(res, null, "Tracking actualizado");
   } catch (e) {
     next(e);
+  }
+};
+
+export const confirmDelivery = async (req, res, next) => {
+  try {
+    await orderSvc.confirmDelivery(req.params.id, req.user.id);
+    success(
+      res,
+      null,
+      "¡Gracias por confirmar! Esperamos que disfrutes tu compra.",
+    );
+  } catch (err) {
+    next(err);
   }
 };

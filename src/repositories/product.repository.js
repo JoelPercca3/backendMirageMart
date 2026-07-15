@@ -443,3 +443,105 @@ export const remove = async (id) => {
   const [result] = await pool.query("DELETE FROM products WHERE id = ?", [id]);
   return result.affectedRows > 0;
 };
+
+export const updateStock = async (productId, cantidad, conn) => {
+  const db = conn || pool;
+  const [result] = await db.query(
+    "UPDATE products SET stock_total = stock_total - ? WHERE id = ? AND stock_total >= ?",
+    [cantidad, productId, cantidad],
+  );
+  return result.affectedRows > 0;
+};
+// ── Reembolso ─────────────────────────────────────────────
+export const refund = async (req, res, next) => {
+  try {
+    const { charge_id, order_id, amount, reason } = req.body;
+
+    if (!charge_id) throw new AppError("Falta el charge_id a reembolsar", 400);
+    if (!order_id) throw new AppError("Falta el order_id", 400);
+
+    const order = await orderRepo.findById(order_id);
+    if (!order) throw new AppError("Pedido no encontrado", 404);
+
+    // Monto en céntimos — si no se especifica, reembolsa el total del pedido
+    const refundAmount = amount
+      ? Math.round(Number(amount) * 100)
+      : Math.round(Number(order.total) * 100);
+
+    const validReasons = [
+      "solicitud_comprador",
+      "duplicado",
+      "fraudulento",
+      "otro",
+    ];
+    const refundReason = validReasons.includes(reason)
+      ? reason
+      : "solicitud_comprador";
+
+    console.log("📤 Enviando reembolso a Culqi:", {
+      charge_id,
+      amount: refundAmount,
+      reason: refundReason,
+    });
+
+    const { data: refundData } = await culqi.post("/refunds", {
+      charge_id,
+      amount: refundAmount,
+      reason: refundReason,
+    });
+
+    console.log(
+      "📥 Respuesta de Culqi (reembolso):",
+      JSON.stringify(refundData, null, 2),
+    );
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      await paymentRepo.updateStatus(
+        order_id,
+        "reembolsado",
+        refundData.id,
+        refundData,
+        conn,
+      );
+
+      await orderRepo.updateStatus(
+        order_id,
+        "reembolsado",
+        "Reembolso procesado",
+        req.user.id,
+        conn,
+      );
+
+      await conn.commit();
+    } catch (dbError) {
+      await conn.rollback();
+      throw dbError;
+    } finally {
+      conn.release();
+    }
+
+    success(
+      res,
+      { refund_id: refundData.id },
+      "Reembolso procesado exitosamente",
+    );
+  } catch (err) {
+    if (err.response?.data) {
+      console.error(
+        "❌ Error Culqi (reembolso):",
+        JSON.stringify(err.response.data, null, 2),
+      );
+      return error(
+        res,
+        err.response.data.user_message ||
+          err.response.data.merchant_message ||
+          "No se pudo procesar el reembolso",
+        400,
+      );
+    }
+    next(err);
+  }
+};

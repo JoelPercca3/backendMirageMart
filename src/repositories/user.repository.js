@@ -8,9 +8,16 @@ export const findByEmail = async (email) => {
   return rows[0] || null;
 };
 
+export const findByDocumento = async (numero_documento) => {
+  const [rows] = await pool.query(
+    "SELECT * FROM users WHERE numero_documento = ? LIMIT 1",
+    [numero_documento],
+  );
+  return rows[0] || null;
+};
+
 export const findById = async (id) => {
   const [rows] = await pool.query(
-    // 👇 AGREGAR: tipo_documento, numero_documento
     "SELECT id, nombre, email, telefono, tipo_documento, numero_documento, avatar_url, rol, activo, email_verificado, created_at FROM users WHERE id = ? LIMIT 1",
     [id],
   );
@@ -22,12 +29,31 @@ export const create = async ({
   email,
   password_hash,
   telefono,
+  tipo_documento,
+  numero_documento,
   token_verificacion,
-  avatar_url, // ← AGREGAR
+  google_id,
+  avatar_url,
+  email_verificado,
+  activo,
 }) => {
   const [result] = await pool.query(
-    "INSERT INTO users (nombre, email, password_hash, telefono, token_verificacion) VALUES (?, ?, ?, ?, ?)",
-    [nombre, email, password_hash, telefono || null, token_verificacion],
+    `INSERT INTO users
+      (nombre, email, password_hash, telefono, tipo_documento, numero_documento, token_verificacion, google_id, avatar_url, email_verificado, activo)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      nombre,
+      email,
+      password_hash || null,
+      telefono || null,
+      tipo_documento || null,
+      numero_documento || null,
+      token_verificacion || null,
+      google_id || null,
+      avatar_url || null,
+      email_verificado ?? 0,
+      activo ?? 1,
+    ],
   );
   return result.insertId;
 };
@@ -36,8 +62,8 @@ export const update = async (id, fields) => {
   const allowed = [
     "nombre",
     "telefono",
-    "tipo_documento", // 👈 NUEVO
-    "numero_documento", // 👈 NUEVO
+    "tipo_documento",
+    "numero_documento",
     "avatar_url",
     "password_hash",
     "activo",
@@ -47,6 +73,7 @@ export const update = async (id, fields) => {
     "token_reset_expires",
     "token_verificacion",
     "ultimo_login",
+    "google_id",
   ];
   const sets = [];
   const values = [];
@@ -95,7 +122,7 @@ export const getAll = async ({ limit, offset, search, rol }) => {
     params,
   );
   const [rows] = await pool.query(
-    `SELECT id, nombre, email, telefono, rol, activo, created_at FROM users ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    `SELECT id, nombre, email, telefono, tipo_documento, numero_documento, rol, activo, created_at FROM users ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
   return { rows, total };

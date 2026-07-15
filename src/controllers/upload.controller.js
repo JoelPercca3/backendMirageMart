@@ -96,10 +96,25 @@ export const uploadCategoryImage = async (req, res, next) => {
 /** Elimina un archivo por public_id (admin) */
 export const deleteFile = async (req, res, next) => {
   try {
-    const { public_id } = req.body;
+    const public_id = req.body.public_id || req.query.public_id;
     if (!public_id) return error(res, "public_id requerido", 400);
     await cloudinary.uploader.destroy(public_id);
     success(res, null, "Imagen eliminada de Cloudinary");
+  } catch (e) {
+    next(e);
+  }
+};
+
+/** Sube fotos de evidencia para una solicitud de devolución (usuario autenticado) */
+export const uploadReturnEvidenceImages = async (req, res, next) => {
+  try {
+    if (!req.files?.length)
+      return error(res, "Debes subir al menos una foto", 400);
+    success(
+      res,
+      req.files.map(fileToResponse),
+      `${req.files.length} foto(s) subida(s)`,
+    );
   } catch (e) {
     next(e);
   }

@@ -4,6 +4,7 @@ import { PORT } from "./config/env.js";
 
 // ✅ Importar rutas de variantes
 import variantRoutes from "./routes/variant.routes.js";
+import { startCronJobs } from "./utils/cron.js";
 
 const start = async () => {
   // 1. Verificar conexión a MySQL
@@ -12,7 +13,10 @@ const start = async () => {
   // ✅ 2. Registrar rutas de variantes ANTES de levantar el servidor
   app.use("/api/v1/admin/variants", variantRoutes);
 
-  // 3. Levantar servidor HTTP
+  // ✅ 3. Iniciar los CRON JOBS (antes de levantar el servidor)
+  startCronJobs();
+
+  // 4. Levantar servidor HTTP
   const server = app.listen(PORT, () => {
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log(`🚀  Servidor:   http://localhost:${PORT}`);
@@ -22,7 +26,7 @@ const start = async () => {
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
   });
 
-  // 4. Graceful shutdown
+  // 5. Graceful shutdown
   const shutdown = (signal) => {
     console.log(`\n⚠️  ${signal} recibido — cerrando servidor...`);
     server.close(() => {

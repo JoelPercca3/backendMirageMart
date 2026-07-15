@@ -18,6 +18,34 @@ export const login = async (req, res, next) => {
   try {
     success(res, await authSvc.login(req.body), "Inicio de sesión exitoso");
   } catch (err) {
+    // Si el error trae requireVerification, lo devolvemos en la respuesta
+    // para que el frontend pueda redirigir a la pantalla de "verifica tu código"
+    if (err.requireVerification) {
+      return error(res, err.message, err.statusCode || 403, {
+        requireVerification: true,
+        email: err.email,
+      });
+    }
+    next(err);
+  }
+};
+
+export const resendCode = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    await authSvc.resendVerificationCode(email);
+    success(res, null, "Código reenviado. Revisa tu correo.");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const verifyCode = async (req, res, next) => {
+  try {
+    const { email, codigo } = req.body;
+    const result = await authSvc.verifyCode(email, codigo);
+    success(res, result, "Email verificado exitosamente.");
+  } catch (err) {
     next(err);
   }
 };
@@ -66,10 +94,10 @@ export const resetPassword = async (req, res, next) => {
   }
 };
 
-export const verifyEmail = async (req, res, next) => {
+export const completeProfile = async (req, res, next) => {
   try {
-    await authSvc.verifyEmail(req.params.token);
-    success(res, null, "Email verificado exitosamente.");
+    const user = await authSvc.completeProfile(req.user.id, req.body);
+    success(res, user, "Perfil completado exitosamente");
   } catch (err) {
     next(err);
   }

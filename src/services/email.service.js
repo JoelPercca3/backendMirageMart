@@ -7,6 +7,7 @@ import {
   MAIL_FROM,
   CLIENT_URL,
 } from "../config/env.js";
+import { escapeHTML } from "../utils/sanitize.js";
 
 // ─── Transporter ──────────────────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
@@ -17,20 +18,31 @@ const transporter = nodemailer.createTransport({
 });
 
 // ─── Función base de envío ────────────────────────────────────────────────────
-// ✅ Ahora acepta "attachments" (array de { filename, content } de nodemailer)
 const send = async ({ to, subject, html, attachments }) => {
+  const isProd = process.env.NODE_ENV === "production";
+
   if (!MAIL_USER || !MAIL_PASS) {
-    console.warn("[Email] Sin configurar — saltando:", subject);
+    const msg = `[Email] Credenciales no configuradas — no se pudo enviar: ${subject}`;
+    if (isProd) {
+      throw new Error(msg);
+    }
+    console.warn(msg);
     return;
   }
-  await transporter.sendMail({
-    from: MAIL_FROM,
-    to,
-    subject,
-    html,
-    ...(attachments?.length ? { attachments } : {}),
-  });
-  console.log(`✅ Email enviado a ${to}: ${subject}`);
+
+  try {
+    await transporter.sendMail({
+      from: MAIL_FROM,
+      to,
+      subject,
+      html,
+      ...(attachments?.length ? { attachments } : {}),
+    });
+    console.log(`✅ Email enviado a ${to}: ${subject}`);
+  } catch (err) {
+    console.error(`❌ Error al enviar email a ${to}:`, err.message);
+    throw err;
+  }
 };
 
 // ─── Estilos base ─────────────────────────────────────────────────────────────
@@ -86,7 +98,7 @@ const wrapHTML = (content, title) => `
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>${title}</title>
+  <title>${escapeHTML(title)}</title>
   <style>${baseCSS}</style>
 </head>
 <body style="padding:16px;">
@@ -117,8 +129,8 @@ const itemsHTML = (items = []) =>
       (item) => `
     <div class="item-row">
       <div>
-        <div class="item-name">${item.nombre_producto || item.nombre}</div>
-        <div class="item-qty">x${item.cantidad}</div>
+        <div class="item-name">${escapeHTML(item.nombre_producto || item.nombre)}</div>
+        <div class="item-qty">x${escapeHTML(item.cantidad)}</div>
       </div>
       <div class="item-price">${formatPrice(item.subtotal)}</div>
     </div>
@@ -126,7 +138,35 @@ const itemsHTML = (items = []) =>
     )
     .join("");
 
-// ─── 1. Verificación de cuenta ────────────────────────────────────────────────
+// ─── 1. Código de verificación (6 dígitos) ────────────────────────────────────
+export const sendVerificationCode = (email, nombre, codigo) =>
+  send({
+    to: email,
+    subject: `✅ Tu código de verificación: ${codigo} — MirageMart`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">¡Hola ${escapeHTML(nombre)}! 👋</p>
+        <p class="subtitle">Gracias por registrarte en MirageMart. Usa este código para verificar tu cuenta:</p>
+
+        <div class="order-box" style="text-align:center;">
+          <div class="order-box-title">Código de verificación</div>
+          <div style="font-size:36px;font-weight:800;color:#ef4444;letter-spacing:8px;margin:12px 0;">
+            ${escapeHTML(codigo)}
+          </div>
+          <span class="badge badge-red">Expira en 10 minutos</span>
+        </div>
+
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px;">
+          Si no creaste esta cuenta, ignora este mensaje. Nunca compartas este código con nadie.
+        </p>
+      </div>
+    `,
+      "Tu código de verificación — MirageMart",
+    ),
+  });
+
+// ─── 2. Verificación de cuenta ────────────────────────────────────────────────
 export const sendVerification = (email, nombre, token) =>
   send({
     to: email,
@@ -134,10 +174,10 @@ export const sendVerification = (email, nombre, token) =>
     html: wrapHTML(
       `
       <div class="body">
-        <p class="greeting">¡Hola ${nombre}! 👋</p>
+        <p class="greeting">¡Hola ${escapeHTML(nombre)}! 👋</p>
         <p class="subtitle">Gracias por registrarte en MirageMart. Solo falta verificar tu correo para activar tu cuenta.</p>
         <div class="btn-center">
-          <a href="${CLIENT_URL}/verify-email/${token}" class="btn">✅ Verificar mi cuenta</a>
+          <a href="${CLIENT_URL}/verify-email/${escapeHTML(token)}" class="btn">✅ Verificar mi cuenta</a>
         </div>
         <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px;">
           El enlace expira en 24 horas. Si no creaste esta cuenta, ignora este mensaje.
@@ -148,7 +188,7 @@ export const sendVerification = (email, nombre, token) =>
     ),
   });
 
-// ─── 2. Restablecer contraseña ────────────────────────────────────────────────
+// ─── 3. Restablecer contraseña ────────────────────────────────────────────────
 export const sendPasswordReset = (email, nombre, token) =>
   send({
     to: email,
@@ -156,10 +196,10 @@ export const sendPasswordReset = (email, nombre, token) =>
     html: wrapHTML(
       `
       <div class="body">
-        <p class="greeting">Hola ${nombre} 🔐</p>
+        <p class="greeting">Hola ${escapeHTML(nombre)} 🔐</p>
         <p class="subtitle">Recibimos una solicitud para restablecer tu contraseña. Haz clic en el botón para continuar.</p>
         <div class="btn-center">
-          <a href="${CLIENT_URL}/reset-password/${token}" class="btn">🔐 Restablecer contraseña</a>
+          <a href="${CLIENT_URL}/reset-password/${escapeHTML(token)}" class="btn">🔐 Restablecer contraseña</a>
         </div>
         <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px;">
           El enlace expira en 1 hora. Si no solicitaste esto, ignora este mensaje.
@@ -170,17 +210,15 @@ export const sendPasswordReset = (email, nombre, token) =>
     ),
   });
 
-// ─── 3. Confirmación de pedido ────────────────────────────────────────────────
-// ✅ Ahora acepta un 4to parámetro opcional "pdfBuffer" — si se pasa, se
-// adjunta el comprobante de pedido en PDF al correo.
+// ─── 4. Confirmación de pedido ────────────────────────────────────────────────
 export const sendOrderConfirmation = (email, nombre, order, pdfBuffer = null) =>
   send({
     to: email,
-    subject: `✅ Pedido #${order.codigo_orden} recibido — MirageMart`,
+    subject: `✅ Pedido #${escapeHTML(order.codigo_orden)} recibido — MirageMart`,
     attachments: pdfBuffer
       ? [
           {
-            filename: `comprobante-${order.codigo_orden}.pdf`,
+            filename: `comprobante-${escapeHTML(order.codigo_orden)}.pdf`,
             content: pdfBuffer,
             contentType: "application/pdf",
           },
@@ -189,12 +227,12 @@ export const sendOrderConfirmation = (email, nombre, order, pdfBuffer = null) =>
     html: wrapHTML(
       `
       <div class="body">
-        <p class="greeting">¡Hola ${nombre}! 🎉</p>
+        <p class="greeting">¡Hola ${escapeHTML(nombre)}! 🎉</p>
         <p class="subtitle">Recibimos tu pedido y está siendo procesado. Te notificaremos cuando sea enviado.${pdfBuffer ? " Adjuntamos tu comprobante de pedido en PDF." : ""}</p>
 
         <div class="order-box">
           <div class="order-box-title">Resumen del pedido</div>
-          <div class="order-code">#${order.codigo_orden}</div>
+          <div class="order-code">#${escapeHTML(order.codigo_orden)}</div>
           <span class="badge badge-blue">Pendiente de confirmación</span>
 
           ${itemsHTML(order.items)}
@@ -214,7 +252,7 @@ export const sendOrderConfirmation = (email, nombre, order, pdfBuffer = null) =>
         <div class="info-grid">
           <div class="info-card">
             <div class="info-label">Código de orden</div>
-            <div class="info-value">#${order.codigo_orden}</div>
+            <div class="info-value">#${escapeHTML(order.codigo_orden)}</div>
           </div>
           <div class="info-card">
             <div class="info-label">Fecha</div>
@@ -225,7 +263,7 @@ export const sendOrderConfirmation = (email, nombre, order, pdfBuffer = null) =>
               ? `
           <div class="info-card">
             <div class="info-label">Destinatario</div>
-            <div class="info-value">${order.nombre_destinatario}</div>
+            <div class="info-value">${escapeHTML(order.nombre_destinatario)}</div>
           </div>`
               : ""
           }
@@ -234,31 +272,31 @@ export const sendOrderConfirmation = (email, nombre, order, pdfBuffer = null) =>
               ? `
           <div class="info-card">
             <div class="info-label">Método de envío</div>
-            <div class="info-value">${order.metodo_envio}</div>
+            <div class="info-value">${escapeHTML(order.metodo_envio)}</div>
           </div>`
               : ""
           }
         </div>
 
         <div class="btn-center">
-          <a href="${CLIENT_URL}/orders/${order.id}" class="btn">Ver mi pedido →</a>
+          <a href="${CLIENT_URL}/orders/${escapeHTML(order.id)}" class="btn">Ver mi pedido →</a>
         </div>
         <div class="btn-center">
-          <a href="https://wa.me/51944174400?text=Hola!%20Consulta%20sobre%20mi%20pedido%20%23${order.codigo_orden}" class="whatsapp-btn">
+          <a href="https://wa.me/51944174400?text=Hola!%20Consulta%20sobre%20mi%20pedido%20%23${escapeHTML(order.codigo_orden)}" class="whatsapp-btn">
             💬 ¿Dudas? Escríbenos por WhatsApp
           </a>
         </div>
       </div>
     `,
-      `Pedido #${order.codigo_orden} recibido — MirageMart`,
+      `Pedido #${escapeHTML(order.codigo_orden)} recibido — MirageMart`,
     ),
   });
 
-// ─── 4. Notificación de contacto (a ti, el admin) ─────────────────────────────
+// ─── 5. Notificación de contacto (a ti, el admin) ⚠️ LA MÁS IMPORTANTE ──────
 export const sendContactAdminNotification = (nombre, email, mensaje) =>
   send({
     to: MAIL_USER,
-    subject: `📩 Nuevo mensaje de contacto — ${nombre}`,
+    subject: `📩 Nuevo mensaje de contacto — ${escapeHTML(nombre)}`,
     html: wrapHTML(
       `
       <div class="body">
@@ -267,26 +305,25 @@ export const sendContactAdminNotification = (nombre, email, mensaje) =>
           <div class="info-grid">
             <div class="info-card">
               <div class="info-label">Nombre</div>
-              <div class="info-value">${nombre}</div>
+              <div class="info-value">${escapeHTML(nombre)}</div>
             </div>
             <div class="info-card">
               <div class="info-label">Email</div>
-              <div class="info-value">${email}</div>
+              <div class="info-value">${escapeHTML(email)}</div>
             </div>
           </div>
           <div class="divider"></div>
-          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;">${mensaje}</p>
+          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;">${escapeHTML(mensaje)}</p>
         </div>
         <div class="btn-center">
-          <a href="mailto:${email}" class="btn">Responder a ${nombre} →</a>
+          <a href="mailto:${email}" class="btn">Responder a ${escapeHTML(nombre)} →</a>
         </div>
       </div>
     `,
-      `Nuevo mensaje de contacto — ${nombre}`,
+      `Nuevo mensaje de contacto — ${escapeHTML(nombre)}`,
     ),
   });
-
-// ─── 5. Confirmación al cliente ───────────────────────────────────────────────
+// ─── 6. Confirmación al cliente ───────────────────────────────────────────────
 export const sendContactConfirmation = (nombre, email) =>
   send({
     to: email,
@@ -294,7 +331,7 @@ export const sendContactConfirmation = (nombre, email) =>
     html: wrapHTML(
       `
       <div class="body">
-        <p class="greeting">¡Hola ${nombre}! 👋</p>
+        <p class="greeting">¡Hola ${escapeHTML(nombre)}! 👋</p>
         <p class="subtitle">
           Recibimos tu mensaje y nuestro equipo te responderá lo antes posible,
           normalmente dentro de las próximas 24 horas.
@@ -310,7 +347,7 @@ export const sendContactConfirmation = (nombre, email) =>
     ),
   });
 
-// ─── 6. Libro de Reclamaciones — constancia al consumidor ─────────────────────
+// ─── 7. Libro de Reclamaciones — constancia al consumidor ─────────────────────
 export const sendLibroReclamacionesConfirmacion = (record, pdfBuffer) =>
   send({
     to: record.email,
@@ -325,22 +362,22 @@ export const sendLibroReclamacionesConfirmacion = (record, pdfBuffer) =>
     html: wrapHTML(
       `
       <div class="body">
-        <p class="greeting">Hola ${record.nombre_completo} 👋</p>
+        <p class="greeting">Hola ${escapeHTML(record.nombre_completo)} 👋</p>
         <p class="subtitle">
-          Recibimos tu ${record.tipo === "reclamo" ? "reclamo" : "queja"} y adjuntamos tu constancia en PDF.
+          Recibimos tu ${escapeHTML(record.tipo === "reclamo" ? "reclamo" : "queja")} y adjuntamos tu constancia en PDF.
           Te responderemos dentro de los próximos 15 días hábiles a este mismo correo.
         </p>
         <div class="order-box">
           <div class="order-box-title">Código de seguimiento</div>
-          <div class="order-code">${record.codigo}</div>
+          <div class="order-code">${escapeHTML(record.codigo)}</div>
         </div>
       </div>
     `,
-      `Constancia de tu ${record.tipo} — ${record.codigo}`,
+      `Constancia de tu ${escapeHTML(record.tipo)} — ${escapeHTML(record.codigo)}`,
     ),
   });
 
-// ─── 7. Libro de Reclamaciones — notificación al admin ─────────────────────────
+// ─── 8. Libro de Reclamaciones — notificación al admin ─────────────────────────
 export const sendLibroReclamacionesAdminNotification = (record) =>
   send({
     to: MAIL_USER,
@@ -359,16 +396,16 @@ export const sendLibroReclamacionesAdminNotification = (record) =>
           <div class="info-grid">
             <div class="info-card">
               <div class="info-label">Nombre</div>
-              <div class="info-value">${record.nombre_completo}</div>
+              <div class="info-value">${escapeHTML(record.nombre_completo)}</div>
             </div>
             <div class="info-card">
               <div class="info-label">Email</div>
-              <div class="info-value">${record.email}</div>
+              <div class="info-value">${escapeHTML(record.email)}</div>
             </div>
           </div>
           <div class="divider"></div>
-          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;"><strong>Detalle:</strong> ${record.detalle}</p>
-          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;margin-top:8px;"><strong>Pedido:</strong> ${record.pedido_consumidor}</p>
+          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;"><strong>Detalle:</strong> ${escapeHTML(record.detalle)}</p>
+          <p style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6;margin-top:8px;"><strong>Pedido:</strong> ${escapeHTML(record.pedido_consumidor)}</p>
         </div>
       </div>
     `,
@@ -376,7 +413,7 @@ export const sendLibroReclamacionesAdminNotification = (record) =>
     ),
   });
 
-// ─── 8. Libro de Reclamaciones — respuesta al consumidor ───────────────────────
+// ─── 9. Libro de Reclamaciones — respuesta al consumidor ───────────────────────
 export const sendLibroReclamacionesRespuesta = (record) =>
   send({
     to: record.email,
@@ -384,11 +421,11 @@ export const sendLibroReclamacionesRespuesta = (record) =>
     html: wrapHTML(
       `
       <div class="body">
-        <p class="greeting">Hola ${record.nombre_completo} 👋</p>
+        <p class="greeting">Hola ${escapeHTML(record.nombre_completo)} 👋</p>
         <p class="subtitle">Aquí tienes nuestra respuesta a tu ${record.tipo === "reclamo" ? "reclamo" : "queja"} con código <strong>${record.codigo}</strong>.</p>
         <div class="order-box">
           <div class="order-box-title">Respuesta</div>
-          <p style="font-size:14px;color:#374151;white-space:pre-wrap;line-height:1.6;">${record.respuesta}</p>
+          <p style="font-size:14px;color:#374151;white-space:pre-wrap;line-height:1.6;">${escapeHTML(record.respuesta)}</p>
         </div>
       </div>
     `,
@@ -396,7 +433,7 @@ export const sendLibroReclamacionesRespuesta = (record) =>
     ),
   });
 
-// ─── 9. Actualización de estado ───────────────────────────────────────────────
+// ─── 10. Actualización de estado ───────────────────────────────────────────────
 const STATUS_INFO = {
   pagado: {
     emoji: "✅",
@@ -437,38 +474,70 @@ export const sendOrderStatus = (email, nombre, order, estado, comentario) => {
     badge: "badge-blue",
     msg: "El estado de tu pedido fue actualizado.",
   };
+  const COURIER_TRACKING_URLS = {
+    Shalom: "https://rastrea.shalom.pe/",
+    "Olva Courier": "https://tracking.olvaexpress.pe/",
+  };
 
   return send({
     to: email,
-    subject: `${info.emoji} Pedido #${order.codigo_orden} — ${info.label} — MirageMart`,
+    subject: `${info.emoji} Pedido #${escapeHTML(order.codigo_orden)} — ${info.label} — MirageMart`,
     html: wrapHTML(
       `
       <div class="body">
-        <p class="greeting">Hola ${nombre} ${info.emoji}</p>
+        <p class="greeting">Hola ${escapeHTML(nombre)} ${info.emoji}</p>
         <p class="subtitle">${info.msg}</p>
 
         <div class="order-box">
           <div class="order-box-title">Estado del pedido</div>
-          <div class="order-code">#${order.codigo_orden}</div>
+          <div class="order-code">#${escapeHTML(order.codigo_orden)}</div>
           <span class="badge ${info.badge}">${info.label}</span>
 
           ${
             comentario
               ? `
             <div class="note-box">
-              <p>💬 <strong>Nota:</strong> ${comentario}</p>
+              <p>💬 <strong>Nota:</strong> ${escapeHTML(comentario)}</p>
             </div>
           `
               : ""
           }
-
           ${
             estado === "enviado" && order.tracking_number
               ? `
-            <div class="tracking-box">
-              <div class="tracking-label">Número de tracking</div>
-              <div class="tracking-value">${order.tracking_number}</div>
-            </div>
+          <div class="tracking-box">
+            <div class="tracking-label">${order.courier ? `Enviado por ${escapeHTML(order.courier)}` : "Número de tracking"}</div>
+            <div class="tracking-value">${escapeHTML(order.tracking_number)}</div>
+            ${
+              order.fecha_envio
+                ? `<p style="font-size:12px;color:#059669;margin-top:8px;">Fecha de envío: ${new Date(order.fecha_envio).toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" })}</p>`
+                : ""
+            }
+            ${
+              order.clave_recojo
+                ? `
+              <div style="margin-top:10px;padding-top:10px;border-top:1px solid #bbf7d0;">
+                <div class="tracking-label">Clave de recojo</div>
+                <div class="tracking-value">${escapeHTML(order.clave_recojo)}</div>
+                <p style="font-size:12px;color:#059669;margin-top:6px;">
+                  Preséntala junto a tu DNI en la agencia para retirar tu pedido.
+                </p>
+              </div>
+            `
+                : ""
+            }
+            ${
+              COURIER_TRACKING_URLS[order.courier]
+                ? `
+              <div style="text-align:center;margin-top:14px;">
+                <a href="${COURIER_TRACKING_URLS[order.courier]}" style="display:inline-block;background:#4f46e5;color:#fff !important;padding:10px 24px;border-radius:10px;text-decoration:none;font-weight:700;font-size:13px;">
+                  🚚 Rastrear envío
+                </a>
+              </div>
+            `
+                : ""
+            }
+          </div>
           `
               : ""
           }
@@ -487,10 +556,10 @@ export const sendOrderStatus = (email, nombre, order, estado, comentario) => {
         }
 
         <div class="btn-center">
-          <a href="${CLIENT_URL}/orders/${order.id}" class="btn">Ver seguimiento →</a>
+          <a href="${CLIENT_URL}/orders/${escapeHTML(order.id)}" class="btn">Ver seguimiento →</a>
         </div>
         <div class="btn-center">
-          <a href="https://wa.me/51944174400?text=Hola!%20Consulta%20sobre%20mi%20pedido%20%23${order.codigo_orden}" class="whatsapp-btn">
+          <a href="https://wa.me/51944174400?text=Hola!%20Consulta%20sobre%20mi%20pedido%20%23${escapeHTML(order.codigo_orden)}" class="whatsapp-btn">
             💬 ¿Dudas? Escríbenos por WhatsApp
           </a>
         </div>
@@ -500,3 +569,259 @@ export const sendOrderStatus = (email, nombre, order, estado, comentario) => {
     ),
   });
 };
+
+// ─── 10. Solicitud de reembolso recibida (al cliente) ─────────────────────────
+export const sendRefundRequestReceived = (email, nombre, order) =>
+  send({
+    to: email,
+    subject: `📋 Recibimos tu solicitud de reembolso — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Hola ${nombre} 👋</p>
+        <p class="subtitle">
+          Recibimos tu solicitud de reembolso para el pedido <strong>#${order.codigo_orden}</strong>.
+          Nuestro equipo la revisará y te notificaremos por este medio en cuanto tengamos una respuesta.
+        </p>
+        <div class="order-box">
+          <div class="order-box-title">Pedido</div>
+          <div class="order-code">#${order.codigo_orden}</div>
+          <span class="badge badge-blue">Solicitud en revisión</span>
+        </div>
+      </div>
+    `,
+      "Solicitud de reembolso recibida — MirageMart",
+    ),
+  });
+
+// ─── 11. Notificación al admin de nueva solicitud ─────────────────────────────
+export const sendRefundRequestAdminNotification = (order, motivo, comentario) =>
+  send({
+    to: MAIL_USER,
+    subject: `⚠️ Nueva solicitud de reembolso — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Nueva solicitud de reembolso</p>
+        <div class="order-box">
+          <div class="order-box-title">Pedido</div>
+          <div class="order-code">#${order.codigo_orden}</div>
+          <div class="divider"></div>
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="info-label">Cliente</div>
+              <div class="info-value">${order.cliente_nombre}</div>
+            </div>
+            <div class="info-card">
+              <div class="info-label">Motivo</div>
+              <div class="info-value">${motivo}</div>
+            </div>
+          </div>
+          ${comentario ? `<div class="divider"></div><p style="font-size:13px;color:#374151;white-space:pre-wrap;">${comentario}</p>` : ""}
+        </div>
+        <div class="btn-center">
+          <a href="${CLIENT_URL}/admin/refund-requests" class="btn">Revisar solicitud →</a>
+        </div>
+      </div>
+    `,
+      `Nueva solicitud de reembolso — #${order.codigo_orden}`,
+    ),
+  });
+
+// ─── 12. Solicitud aprobada (al cliente) ──────────────────────────────────────
+export const sendRefundRequestApproved = (email, nombre, order, monto) =>
+  send({
+    to: email,
+    subject: `✅ Tu reembolso fue aprobado — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">¡Buenas noticias, ${nombre}! 🎉</p>
+        <p class="subtitle">
+          Tu solicitud de reembolso para el pedido <strong>#${order.codigo_orden}</strong> fue aprobada.
+          El monto será devuelto a tu método de pago original.
+        </p>
+        <div class="order-box">
+          <div class="order-box-title">Monto reembolsado</div>
+          <div class="order-code">${formatPrice(monto)}</div>
+          <span class="badge badge-green">Reembolso procesado</span>
+        </div>
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px;">
+          Algunos bancos pueden tardar entre 15 y 30 días en reflejar el reembolso en tu estado de cuenta.
+        </p>
+      </div>
+    `,
+      "Reembolso aprobado — MirageMart",
+    ),
+  });
+
+// ─── 13. Solicitud rechazada (al cliente) ─────────────────────────────────────
+export const sendRefundRequestRejected = (email, nombre, order, respuesta) =>
+  send({
+    to: email,
+    subject: `Actualización sobre tu solicitud de reembolso — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Hola ${nombre}</p>
+        <p class="subtitle">
+          Revisamos tu solicitud de reembolso para el pedido <strong>#${order.codigo_orden}</strong>
+          y, lamentablemente, no pudimos aprobarla.
+        </p>
+        ${
+          respuesta
+            ? `<div class="note-box"><p>💬 <strong>Motivo:</strong> ${respuesta}</p></div>`
+            : ""
+        }
+        <div class="btn-center">
+          <a href="https://wa.me/51944174400" class="whatsapp-btn">
+            💬 ¿Dudas? Escríbenos por WhatsApp
+          </a>
+        </div>
+      </div>
+    `,
+      "Actualización de tu solicitud de reembolso — MirageMart",
+    ),
+  });
+
+// ─── 14. Devolución: solicitud recibida (cliente) ─────────────────────────────
+export const sendReturnRequestReceived = (email, nombre, order, item) =>
+  send({
+    to: email,
+    subject: `📦 Recibimos tu solicitud de devolución — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Hola ${nombre} 👋</p>
+        <p class="subtitle">
+          Recibimos tu solicitud de devolución para <strong>${item.nombre_producto}</strong>
+          del pedido <strong>#${order.codigo_orden}</strong>. La revisaremos pronto.
+        </p>
+        <div class="order-box">
+          <div class="order-box-title">Producto</div>
+          <div class="order-code">${item.nombre_producto}</div>
+          <span class="badge badge-blue">Solicitud en revisión</span>
+        </div>
+      </div>
+    `,
+      "Solicitud de devolución recibida — MirageMart",
+    ),
+  });
+
+// ─── 15. Devolución: notificación al admin ────────────────────────────────────
+export const sendReturnRequestAdminNotification = (
+  order,
+  item,
+  motivo,
+  comentario,
+) =>
+  send({
+    to: MAIL_USER,
+    subject: `📦 Nueva solicitud de devolución — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Nueva solicitud de devolución</p>
+        <div class="order-box">
+          <div class="order-box-title">Producto</div>
+          <div class="order-code">${item.nombre_producto}</div>
+          <div class="divider"></div>
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="info-label">Cliente</div>
+              <div class="info-value">${order.cliente_nombre}</div>
+            </div>
+            <div class="info-card">
+              <div class="info-label">Motivo</div>
+              <div class="info-value">${motivo}</div>
+            </div>
+          </div>
+          ${comentario ? `<div class="divider"></div><p style="font-size:13px;color:#374151;white-space:pre-wrap;">${comentario}</p>` : ""}
+        </div>
+        <div class="btn-center">
+          <a href="${CLIENT_URL}/admin/return-requests" class="btn">Revisar solicitud →</a>
+        </div>
+      </div>
+    `,
+      `Nueva devolución — #${order.codigo_orden}`,
+    ),
+  });
+
+// ─── 16. Devolución: aprobada, con instrucciones de envío (cliente) ───────────
+export const sendReturnRequestApproved = (
+  email,
+  nombre,
+  order,
+  instrucciones,
+) =>
+  send({
+    to: email,
+    subject: `✅ Devolución aprobada — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">¡Buenas noticias, ${nombre}! 📦</p>
+        <p class="subtitle">
+          Tu solicitud de devolución para el pedido <strong>#${order.codigo_orden}</strong> fue aprobada.
+          Por favor, envía el producto siguiendo estas instrucciones:
+        </p>
+        <div class="note-box">
+          <p>${instrucciones || "Nos pondremos en contacto contigo por WhatsApp para coordinar el envío del producto."}</p>
+        </div>
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px;">
+          Una vez que recibamos el producto y verifiquemos su estado, procesaremos tu reembolso.
+        </p>
+      </div>
+    `,
+      "Devolución aprobada — MirageMart",
+    ),
+  });
+
+// ─── 17. Devolución: rechazada (cliente) ──────────────────────────────────────
+export const sendReturnRequestRejected = (email, nombre, order, respuesta) =>
+  send({
+    to: email,
+    subject: `Actualización sobre tu devolución — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">Hola ${nombre}</p>
+        <p class="subtitle">
+          Revisamos tu solicitud de devolución para el pedido <strong>#${order.codigo_orden}</strong>
+          y, lamentablemente, no pudimos aprobarla.
+        </p>
+        ${respuesta ? `<div class="note-box"><p>💬 <strong>Motivo:</strong> ${respuesta}</p></div>` : ""}
+        <div class="btn-center">
+          <a href="https://wa.me/51944174400" class="whatsapp-btn">💬 ¿Dudas? Escríbenos por WhatsApp</a>
+        </div>
+      </div>
+    `,
+      "Actualización de tu devolución — MirageMart",
+    ),
+  });
+
+// ─── 18. Devolución: reembolso confirmado tras recibir el producto (cliente) ──
+export const sendReturnRefundConfirmed = (email, nombre, order, monto) =>
+  send({
+    to: email,
+    subject: `✅ Devolución completada — Pedido #${order.codigo_orden}`,
+    html: wrapHTML(
+      `
+      <div class="body">
+        <p class="greeting">¡Listo, ${nombre}! 🎉</p>
+        <p class="subtitle">
+          Recibimos tu producto en buenas condiciones y ya procesamos tu reembolso.
+        </p>
+        <div class="order-box">
+          <div class="order-box-title">Monto reembolsado</div>
+          <div class="order-code">${formatPrice(monto)}</div>
+          <span class="badge badge-green">Reembolso procesado</span>
+        </div>
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px;">
+          Algunos bancos pueden tardar entre 15 y 30 días en reflejar el reembolso.
+        </p>
+      </div>
+    `,
+      "Devolución completada — MirageMart",
+    ),
+  });

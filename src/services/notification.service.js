@@ -81,3 +81,72 @@ export const notifyOrderPreparing = (userId, orderId, codigoOrden) =>
     "pedido",
     `/orders/${orderId}`,
   );
+
+// ─── Notificaciones de reembolsos y devoluciones ──────────────────────────────
+
+export const notifyRefundRequestApproved = (
+  userId,
+  orderId,
+  codigoOrden,
+  monto,
+) =>
+  createNotification(
+    userId,
+    "✅ Reembolso aprobado",
+    `Tu solicitud de reembolso del pedido #${codigoOrden} fue aprobada. Se procesó S/ ${Number(monto).toFixed(2)}.`,
+    "reembolso",
+    `/orders/${orderId}`,
+  );
+
+export const notifyRefundRequestRejected = (userId, orderId, codigoOrden) =>
+  createNotification(
+    userId,
+    "Solicitud de reembolso rechazada",
+    `Tu solicitud de reembolso del pedido #${codigoOrden} no pudo ser aprobada. Revisa los detalles.`,
+    "reembolso",
+    `/orders/${orderId}`,
+  );
+
+export const notifyReturnRequestApproved = (userId, orderId, codigoOrden) =>
+  createNotification(
+    userId,
+    "📦 Devolución aprobada",
+    `Tu solicitud de devolución del pedido #${codigoOrden} fue aprobada. Revisa las instrucciones de envío.`,
+    "reembolso",
+    `/orders/${orderId}`,
+  );
+
+export const notifyReturnRequestRejected = (userId, orderId, codigoOrden) =>
+  createNotification(
+    userId,
+    "Solicitud de devolución rechazada",
+    `Tu solicitud de devolución del pedido #${codigoOrden} no pudo ser aprobada. Revisa los detalles.`,
+    "reembolso",
+    `/orders/${orderId}`,
+  );
+
+export const notifyReturnRefunded = (userId, orderId, codigoOrden, monto) =>
+  createNotification(
+    userId,
+    "🎉 Devolución completada",
+    `Recibimos tu producto del pedido #${codigoOrden} y procesamos tu reembolso de S/ ${Number(monto).toFixed(2)}.`,
+    "reembolso",
+    `/orders/${orderId}`,
+  );
+
+export const notifyAdminRefund = (
+  userId,
+  orderId,
+  codigoOrden,
+  monto,
+  esCompleto,
+) =>
+  createNotification(
+    userId,
+    esCompleto
+      ? "✅ Reembolso total procesado"
+      : "💰 Reembolso parcial procesado",
+    `Se procesó un reembolso de S/ ${Number(monto).toFixed(2)} para tu pedido #${codigoOrden}.`,
+    "reembolso",
+    `/orders/${orderId}`,
+  );

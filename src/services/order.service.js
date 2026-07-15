@@ -230,6 +230,7 @@ export const cancel = async (id, userId) => {
   if (order.user_id !== userId) throw new AppError("No autorizado", 403);
   if (!["pendiente", "pagado"].includes(order.estado))
     throw new AppError("Este pedido ya no puede cancelarse", 400);
+  const eraPagado = order.estado === "pagado"; // ← guardamos esto antes de cambiar el estado
 
   const conn = await pool.getConnection();
   try {
@@ -335,7 +336,94 @@ export const updateStatus = async (id, estado, comentario, adminId) => {
   if (fn) await fn();
 };
 
-export const updateTracking = async (id, tracking_number) => {
-  await orderRepo.updateTracking(id, tracking_number);
-  await orderRepo.updateStatus(id, "enviado", `Tracking: ${tracking_number}`);
+export const updateTracking = async (
+  id,
+  tracking_number,
+  courier,
+  clave_recojo,
+) => {
+  await orderRepo.updateTracking(id, tracking_number, courier, clave_recojo);
+  await updateStatus(
+    id,
+    "enviado",
+    clave_recojo
+      ? `Enviado por ${courier} — Guía: ${tracking_number} — Clave de recojo: ${clave_recojo}`
+      : `Enviado por ${courier} — Guía: ${tracking_number}`,
+  );
+};
+
+// ✅ Cliente confirma manualmente que recibió su pedido
+export const confirmDelivery = async (orderId, userId) => {
+  const order = await orderRepo.findById(orderId, userId);
+  if (!order) throw new AppError("Pedido no encontrado", 404);
+  if (order.user_id !== userId)
+    throw new AppError("No tienes permiso sobre este pedido", 403);
+
+  if (order.estado !== "enviado") {
+    throw new AppError(
+      "Solo puedes confirmar la recepción de un pedido en camino",
+      400,
+    );
+  }
+
+  await orderRepo.updateStatus(
+    orderId,
+    "entregado",
+    "Entrega confirmada por el cliente",
+    null,
+    undefined, // conn por defecto = pool
+  );
+
+  const updatedOrder = await orderRepo.findById(orderId, userId);
+  if (updatedOrder?.cliente_email) {
+    sendOrderStatus(
+      updatedOrder.cliente_email,
+      updatedOrder.cliente_nombre,
+      updatedOrder,
+      "entregado",
+      "Confirmado por ti",
+    ).catch((err) => console.error("Error email confirmación entrega:", err));
+  }
+  await notifyOrderDelivered(userId, orderId, order.codigo_orden);
+
+  return { estado: "entregado" };
+};
+
+// ✅ Auto-confirma entregas de pedidos enviados hace más de N días (usado por el cron)
+export const autoConfirmDeliveries = async (days = 5) => {
+  const candidates = await orderRepo.findShippedOlderThan(days);
+
+  for (const order of candidates) {
+    try {
+      await orderRepo.updateStatus(
+        order.id,
+        "entregado",
+        `Entrega auto-confirmada tras ${days} días sin confirmación del cliente`,
+        null,
+      );
+
+      const fullOrder = await orderRepo.findById(order.id, order.user_id);
+      if (fullOrder?.cliente_email) {
+        sendOrderStatus(
+          fullOrder.cliente_email,
+          fullOrder.cliente_nombre,
+          fullOrder,
+          "entregado",
+          "Confirmación automática",
+        ).catch((err) => console.error("Error email auto-confirmación:", err));
+      }
+      await notifyOrderDelivered(order.user_id, order.id, order.codigo_orden);
+
+      console.log(
+        `✅ Pedido #${order.codigo_orden} auto-confirmado como entregado`,
+      );
+    } catch (err) {
+      console.error(
+        `❌ Error auto-confirmando pedido #${order.codigo_orden}:`,
+        err,
+      );
+    }
+  }
+
+  return { procesados: candidates.length };
 };

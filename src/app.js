@@ -6,7 +6,7 @@ import compression from "compression";
 import path from "path";
 import { fileURLToPath } from "url";
 import cardRoutes from "./routes/card.routes.js";
-
+import sitemapRoutes from "./routes/sitemap.routes.js";
 import { CLIENT_URL, ADMIN_URL, NODE_ENV } from "./config/env.js";
 import { generalLimiter } from "./middlewares/rateLimiter.middleware.js";
 import { errorHandler } from "./middlewares/errorHandler.middleware.js";
@@ -14,6 +14,8 @@ import routes from "./routes/index.js";
 import contactRoutes from "./routes/contact.routes.js";
 import libroReclamacionesRoutes from "./routes/libroReclamaciones.routes.js";
 import newsletterRoutes from "./routes/newsletter.routes.js";
+import refundRequestRoutes from "./routes/refundRequest.routes.js";
+import returnRequestRoutes from "./routes/returnRequest.routes.js";
 
 // __dirname equivalente en ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -56,6 +58,7 @@ app.use(generalLimiter);
 
 // ── Archivos estáticos (uploads) ──────────────────────────
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+
 // ── Healthcheck ───────────────────────────────────────────
 app.get("/health", (_req, res) =>
   res.json({
@@ -70,8 +73,11 @@ app.get("/health", (_req, res) =>
 app.use("/api/v1", routes);
 app.use("/api/v1/contact", contactRoutes);
 app.use("/api/v1/libro-reclamaciones", libroReclamacionesRoutes);
-app.use("/api/v1/newsletter", newsletterRoutes); // ← NUEVA RUTA
+app.use("/api/v1/newsletter", newsletterRoutes);
 app.use("/api/v1/cards", cardRoutes);
+app.use("/", sitemapRoutes);
+app.use("/api/v1/refund-requests", refundRequestRoutes);
+app.use("/api/v1/return-requests", returnRequestRoutes);
 
 // ── 404 ───────────────────────────────────────────────────
 app.use((req, res) =>

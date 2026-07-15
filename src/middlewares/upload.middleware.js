@@ -30,8 +30,8 @@ const createStorage = (folder) =>
     cloudinary,
     params: {
       folder,
+      resource_type: "image", // 👈 fuerza a Cloudinary a tratarlo/validarlo como imagen
       allowed_formats: ["jpg", "jpeg", "png", "webp", "gif", "avif"],
-      // Sin transformation: Cloudinary guarda el original completo
     },
   });
 
@@ -69,6 +69,13 @@ export const uploadReview = multer({
 /** Avatar de perfil — original sin transformar, cualquier usuario autenticado */
 export const uploadAvatar = multer({
   storage: createStorage("miragemart/avatars"),
+  fileFilter,
+  limits,
+});
+
+/** Fotos de evidencia para devoluciones — cualquier usuario autenticado, hasta 5 fotos */
+export const uploadReturnEvidence = multer({
+  storage: createStorage("miragemart/returns"),
   fileFilter,
   limits,
 });

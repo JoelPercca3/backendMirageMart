@@ -83,21 +83,28 @@ export const create = async (orderData, items, conn) => {
   return orderId;
 };
 
-// ─── FIX 1: userId es opcional — cuando lo llama el admin o updateStatus
-//     no se pasa userId, así que la subquery de has_reviewed usa NULL (devuelve 0, correcto)
 export const findById = async (id, userId = null) => {
   const [rows] = await pool.query(
     `SELECT o.*,
-            u.nombre  AS cliente_nombre,
-            u.email   AS cliente_email,
+            u.nombre           AS cliente_nombre,
+            u.email            AS cliente_email,
+            u.telefono         AS cliente_telefono,
+            u.tipo_documento   AS cliente_tipo_documento,
+            u.numero_documento AS cliente_numero_documento,
             sm.nombre AS metodo_envio,
             sm.dias_entrega_min,
             sm.dias_entrega_max,
+            sm.es_recojo_tienda,  -- ✅ AGREGAR ESTA LÍNEA
+            a.nombre_destinatario,
             a.calle,
-            a.ciudad,
+            a.referencia,
+            a.distrito,
+            a.provincia,
             a.departamento,
+            a.ciudad,
+            a.codigo_postal,
             a.pais,
-            a.nombre_destinatario
+            a.telefono_contacto
      FROM orders o
      JOIN  users            u  ON o.user_id           = u.id
      LEFT JOIN shipping_methods sm ON o.shipping_method_id = sm.id
@@ -109,7 +116,6 @@ export const findById = async (id, userId = null) => {
 
   if (!rows[0]) return null;
 
-  // has_reviewed solo tiene sentido si hay un userId — si no, siempre false
   const [items] = await pool.query(
     `SELECT oi.*,
             p.slug AS product_slug,
@@ -139,18 +145,68 @@ export const findById = async (id, userId = null) => {
   );
 
   const [payments] = await pool.query(
-    `SELECT metodo, estado, referencia_externa, monto, paid_at
-     FROM payments
-     WHERE order_id = ?
+    `SELECT p.metodo, p.estado, p.referencia_externa, p.monto, p.paid_at, p.respuesta_pasarela,
+          COALESCE((
+            SELECT SUM(monto) FROM refunds WHERE payment_id = p.id
+          ), 0) AS monto_reembolsado
+   FROM payments p
+   WHERE p.order_id = ?
+   LIMIT 1`,
+    [id],
+  );
+
+  const [refunds] = await pool.query(
+    `SELECT id, refund_id, monto, reason, status, respuesta_pasarela, fecha_reembolso, created_at
+   FROM refunds
+   WHERE order_id = ?
+   ORDER BY id ASC`,
+    [id],
+  );
+
+  const [refundRequestRows] = await pool.query(
+    `SELECT id, motivo, comentario, monto_solicitado, estado, respuesta_admin, created_at, reviewed_at
+     FROM refund_requests 
+     WHERE order_id = ? 
+     ORDER BY id DESC 
      LIMIT 1`,
     [id],
   );
+
+  // 🔥 NUEVO: Consulta para obtener todas las solicitudes de devolución por ítem
+  const [returnRequestRows] = await pool.query(
+    `SELECT id, order_item_id, motivo, comentario, cantidad, fotos, monto_reembolso,
+            estado, respuesta_admin, instrucciones_admin, created_at
+     FROM return_requests 
+     WHERE order_id = ?`,
+    [id],
+  );
+
+  // 🔥 NUEVO: Agrupar las solicitudes de devolución por order_item_id
+  const returnRequestsByItem = {};
+  returnRequestRows.forEach((rr) => {
+    returnRequestsByItem[rr.order_item_id] = rr;
+  });
+
+  // 🔥 NUEVO: Asignar a cada item su solicitud de devolución correspondiente (o null)
+  items.forEach((item) => {
+    item.return_request = returnRequestsByItem[item.id] || null;
+  });
+
+  const payment = payments[0] || null;
+
+  const necesitaReembolso =
+    rows[0].estado === "cancelado" &&
+    payment?.estado === "completado" &&
+    Number(payment?.monto_reembolsado || 0) < Number(rows[0].total);
 
   return {
     ...rows[0],
     items,
     history,
-    payment: payments[0] || null,
+    payment,
+    refunds,
+    necesita_reembolso: necesitaReembolso,
+    refund_request: refundRequestRows[0] || null,
   };
 };
 
@@ -244,9 +300,44 @@ export const updateStatus = async (
   );
 };
 
-export const updateTracking = async (id, tracking_number) => {
+export const updateTracking = async (
+  id,
+  tracking_number,
+  courier,
+  clave_recojo,
+) => {
   await pool.query(
-    "UPDATE orders SET tracking_number = ?, fecha_envio = NOW() WHERE id = ?",
-    [tracking_number, id],
+    "UPDATE orders SET tracking_number = ?, courier = ?, clave_recojo = ?, fecha_envio = NOW() WHERE id = ?",
+    [tracking_number, courier, clave_recojo || null, id],
   );
+};
+
+// ✅ Fecha real de entrega — se usa para calcular la ventana de 7 días
+// para solicitar devoluciones. Tomamos el registro más reciente con
+// estado "entregado" del historial (no order_items ni orders.fecha_entrega
+// directamente, para no depender de que ese campo se llene manualmente).
+export const getFechaEntrega = async (orderId) => {
+  const [rows] = await pool.query(
+    `SELECT created_at FROM order_status_history
+     WHERE order_id = ? AND estado = 'entregado'
+     ORDER BY id DESC LIMIT 1`,
+    [orderId],
+  );
+  return rows[0]?.created_at || null;
+};
+
+// ✅ Pedidos "enviado" hace más de N días, que NO son recojo en tienda
+// (esos los confirma el admin manualmente al entregar en persona)
+export const findShippedOlderThan = async (days) => {
+  const [rows] = await pool.query(
+    `SELECT o.id, o.user_id, o.codigo_orden
+     FROM orders o
+     JOIN shipping_methods sm ON o.shipping_method_id = sm.id
+     WHERE o.estado = 'enviado'
+       AND sm.es_recojo_tienda = 0
+       AND o.fecha_envio IS NOT NULL
+       AND o.fecha_envio <= DATE_SUB(NOW(), INTERVAL ? DAY)`,
+    [days],
+  );
+  return rows;
 };

@@ -5,6 +5,14 @@ import { pool } from "../config/database.js";
 import { success, created, paginated, error } from "../utils/response.js";
 import { getPagination } from "../utils/paginate.js";
 import { AppError } from "../middlewares/errorHandler.middleware.js";
+import {
+  formatDateTime,
+  formatDate,
+  formatTime,
+  parseCreationDate,
+} from "../utils/dateFormatter.js";
+import { processRefund } from "../services/payment.service.js";
+import { notifyAdminRefund } from "../services/notification.service.js"; // ✅ nuevo import
 
 // ── Crear cargo con Culqi ─────────────────────────────────
 export const createCharge = async (req, res, next) => {
@@ -176,86 +184,157 @@ export const webhook = async (req, res) => {
   try {
     const event = req.body;
 
-    console.log("[Culqi Webhook COMPLETO]", JSON.stringify(event, null, 2));
+    console.log("[Culqi Webhook] Evento recibido:", event.type);
 
-    // Compatibilidad con distintos eventos de Culqi
     if (
       event.type === "charge.succeeded" ||
       event.type === "charge.creation.succeeded"
     ) {
-      // Algunas versiones de Culqi envían la info en data.object
-      const chargeData =
+      const chargeDataRaw =
         typeof event.data === "string"
           ? JSON.parse(event.data)
           : event.data?.object || event.data;
-      console.log("ChargeData:", chargeData);
+
+      const chargeId = chargeDataRaw?.id;
+
+      if (!chargeId) {
+        console.log("⚠️ Webhook sin charge id — ignorado");
+        return res.status(200).json({ received: true });
+      }
+
+      // ── ⚠️ NO CONFIAR EN EL PAYLOAD DEL WEBHOOK ────────────
+      // Culqi no firma sus webhooks (sin HMAC ni secreto verificable),
+      // así que cualquiera podría enviar un POST falso a esta URL.
+      // Por eso, en vez de creer el body, le preguntamos directamente
+      // a la API de Culqi si este cargo existe y fue realmente exitoso.
+      let chargeData;
+      try {
+        const verifiedCharge = await culqi.get(`/charges/${chargeId}`);
+        chargeData = verifiedCharge.data;
+      } catch (verifyErr) {
+        console.error(
+          "❌ No se pudo verificar el cargo contra la API de Culqi:",
+          verifyErr.response?.data || verifyErr.message,
+        );
+        // Respondemos 200 igual (Culqi no debe reintentar indefinidamente
+        // por un cargo que no pudimos verificar), pero NO actualizamos nada.
+        return res.status(200).json({ received: true });
+      }
 
       const orderId = chargeData?.metadata?.order_id;
 
-      console.log("Order ID recibido:", orderId);
-
-      if (orderId) {
-        // Actualizar orden
-        await orderRepo.updateStatus(
-          orderId,
-          "pagado",
-          "Pago confirmado por webhook",
-        );
-
-        // Actualizar pago
-        await paymentRepo.updateStatus(
-          orderId,
-          "completado",
-          chargeData.id,
-          chargeData,
-        );
-
-        console.log("✅ Orden actualizada por webhook");
-      } else {
-        console.log("⚠️ No se encontró order_id en metadata");
+      if (!orderId) {
+        console.log("⚠️ No se encontró order_id en metadata verificada");
+        return res.status(200).json({ received: true });
       }
+
+      if (chargeData.outcome?.type !== "venta_exitosa") {
+        console.log(
+          `⚠️ Cargo ${chargeId} verificado pero NO exitoso (${chargeData.outcome?.type}) — no se actualiza el pedido`,
+        );
+        return res.status(200).json({ received: true });
+      }
+
+      // ── Idempotencia: si el pedido ya está pagado, no lo procesamos de nuevo ──
+      const order = await orderRepo.findById(orderId);
+      if (!order) {
+        console.log(`⚠️ Pedido ${orderId} no encontrado — webhook ignorado`);
+        return res.status(200).json({ received: true });
+      }
+      if (order.estado !== "pendiente") {
+        console.log(
+          `ℹ️ Pedido ${orderId} ya estaba en estado "${order.estado}" — webhook ignorado (evita doble procesamiento)`,
+        );
+        return res.status(200).json({ received: true });
+      }
+
+      await orderRepo.updateStatus(
+        orderId,
+        "pagado",
+        "Pago confirmado por webhook (verificado contra API de Culqi)",
+      );
+
+      await paymentRepo.updateStatus(
+        orderId,
+        "completado",
+        chargeData.id,
+        chargeData,
+      );
+
+      console.log(`✅ Orden ${orderId} actualizada por webhook (verificado)`);
     }
 
     res.status(200).json({ received: true });
   } catch (err) {
     console.error("[Webhook Error]", err);
-
     res.status(200).json({ received: true });
   }
 };
+
 // ── Obtener pago por orden ────────────────────────────────
 export const getByOrder = async (req, res, next) => {
   try {
     const payment = await paymentRepo.findByOrder(req.params.orderId);
-
+    if (!payment) return success(res, null);
     success(res, payment);
   } catch (err) {
     next(err);
   }
 };
 
-// ── Reembolso ─────────────────────────────────────────────
+// ── Reembolso (manual, iniciado por el admin) ─────────────
 export const refund = async (req, res, next) => {
   try {
-    const { charge_id, order_id } = req.body;
+    const { order_id, amount, reason } = req.body;
+    if (!order_id) throw new AppError("Falta el order_id", 400);
 
-    await culqi.refunds.createRefund({
-      amount: req.body.amount,
-      charge_id,
-      reason: "solicitud_comprador",
+    const order = await orderRepo.findById(order_id);
+    if (!order) throw new AppError("Pedido no encontrado", 404);
+
+    const { refundData, refundResult, montoSoles } = await processRefund({
+      order_id,
+      amount,
+      reason,
+      adminId: req.user.id,
     });
 
-    await paymentRepo.updateStatus(order_id, "reembolsado", charge_id, null);
-
-    await orderRepo.updateStatus(
+    // ✅ notificación in-app para el cliente
+    notifyAdminRefund(
+      order.user_id,
       order_id,
-      "reembolsado",
-      "Reembolso procesado",
-      req.user.id,
-    );
+      order.codigo_orden,
+      montoSoles,
+      refundResult.esReembolsoCompleto,
+    ).catch((e) => console.error("Error notificación reembolso admin:", e));
 
-    success(res, null, "Reembolso procesado");
+    success(
+      res,
+      {
+        refund_id: refundData.id,
+        amount: montoSoles,
+        reason: refundData.reason,
+        status: refundData.status,
+        es_reembolso_completo: refundResult.esReembolsoCompleto,
+        monto_reembolsado_acumulado: refundResult.nuevoAcumulado,
+      },
+      refundResult.esReembolsoCompleto
+        ? "Reembolso total procesado exitosamente"
+        : "Reembolso parcial procesado exitosamente",
+    );
   } catch (err) {
+    if (err.response?.data) {
+      console.error(
+        "❌ Error Culqi (reembolso):",
+        JSON.stringify(err.response.data, null, 2),
+      );
+      return error(
+        res,
+        err.response.data.user_message ||
+          err.response.data.merchant_message ||
+          "No se pudo procesar el reembolso",
+        400,
+      );
+    }
     next(err);
   }
 };

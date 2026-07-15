@@ -1,6 +1,7 @@
 import * as productSvc from "../services/product.service.js";
 import { pool } from "../config/database.js";
 import { success, created, paginated } from "../utils/response.js";
+import { deleteManyFromCloudinary } from "../utils/cloudinaryHelpers.js";
 
 export const getAll = async (req, res, next) => {
   try {
@@ -144,7 +145,7 @@ export const create = async (req, res, next) => {
   }
 };
 
-// ✅ UPDATE - CORREGIDO
+// ✅ UPDATE - CORREGIDO CON LIMPIEZA DE CLOUDINARY
 export const update = async (req, res, next) => {
   try {
     const { imagenes, atributos, variantes, ...productData } = req.body;
@@ -163,6 +164,15 @@ export const update = async (req, res, next) => {
       const validImages = imagenes.filter(
         (img) => img && typeof img === "string" && img.trim() !== "",
       );
+
+      // ✅ Antes de borrar, obtenemos las imágenes viejas para
+      // eliminar de Cloudinary solo las que ya NO están en el nuevo set
+      const [oldImages] = await pool.query(
+        "SELECT url FROM product_images WHERE product_id = ? AND variant_id IS NULL",
+        [productId],
+      );
+      const oldUrls = oldImages.map((row) => row.url);
+      const urlsToDelete = oldUrls.filter((url) => !validImages.includes(url));
 
       // 🔥 SOLO borrar imágenes BASE (variant_id IS NULL)
       await pool.query(
@@ -184,6 +194,14 @@ export const update = async (req, res, next) => {
         JSON.stringify(validImages),
         productId,
       ]);
+
+      // ✅ Limpiar de Cloudinary las imágenes que ya no se usan
+      // (no bloqueamos la respuesta si falla — es limpieza secundaria)
+      if (urlsToDelete.length > 0) {
+        deleteManyFromCloudinary(urlsToDelete).catch((err) =>
+          console.error("Error limpiando imágenes viejas de Cloudinary:", err),
+        );
+      }
     }
 
     // ─────────────────────────────────────────────
@@ -285,9 +303,36 @@ export const update = async (req, res, next) => {
   }
 };
 
+// ✅ REMOVE - CORREGIDO CON LIMPIEZA DE CLOUDINARY
 export const remove = async (req, res, next) => {
   try {
-    await productSvc.remove(Number(req.params.id));
+    const productId = Number(req.params.id);
+
+    // ✅ Antes de eliminar el producto, recolectamos todas sus imágenes
+    // (base + variantes) para limpiarlas de Cloudinary también
+    const [images] = await pool.query(
+      "SELECT url FROM product_images WHERE product_id = ?",
+      [productId],
+    );
+    const [variantImages] = await pool.query(
+      "SELECT imagen_url AS url FROM product_variants WHERE product_id = ? AND imagen_url IS NOT NULL",
+      [productId],
+    );
+    const allUrls = [...images, ...variantImages].map((row) => row.url);
+
+    // Eliminar el producto
+    await productSvc.remove(productId);
+
+    // ✅ Limpiar de Cloudinary (no bloqueamos la respuesta si falla)
+    if (allUrls.length > 0) {
+      deleteManyFromCloudinary(allUrls).catch((err) =>
+        console.error(
+          "Error limpiando imágenes de Cloudinary tras eliminar producto:",
+          err,
+        ),
+      );
+    }
+
     success(res, null, "Producto eliminado");
   } catch (e) {
     next(e);

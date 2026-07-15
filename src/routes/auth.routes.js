@@ -2,13 +2,21 @@ import { Router } from "express";
 import * as ctrl from "../controllers/auth.controller.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import { authJWT } from "../middlewares/auth.middleware.js";
-import { authLimiter } from "../middlewares/rateLimiter.middleware.js";
+import {
+  authLimiter,
+  verifyCodeLimiter,
+  resendCodeLimiter,
+} from "../middlewares/rateLimiter.middleware.js";
 import {
   registerSchema,
   loginSchema,
   forgotSchema,
   resetSchema,
+  completeProfileSchema,
+  resendCodeSchema,
+  verifyCodeSchema,
 } from "../schemas/auth.schema.js";
+
 import passport from "../config/passport.js";
 import { generateTokens } from "../services/auth.service.js";
 
@@ -26,19 +34,52 @@ router.post(
   validate(forgotSchema),
   ctrl.forgotPassword,
 );
+
+// Verificación de email por código (6 dígitos)
+router.post("/resend-code", authLimiter, ctrl.resendCode);
+router.post("/verify-code", authLimiter, ctrl.verifyCode);
+router.post(
+  "/resend-code",
+  authLimiter,
+  validate(resendCodeSchema),
+  ctrl.resendCode,
+);
+router.post(
+  "/verify-code",
+  authLimiter,
+  validate(verifyCodeSchema),
+  ctrl.verifyCode,
+);
 router.post(
   "/reset-password/:token",
   validate(resetSchema),
   ctrl.resetPassword,
 );
-router.get("/verify-email/:token", ctrl.verifyEmail);
 
+router.patch(
+  "/complete-profile",
+  authJWT,
+  validate(completeProfileSchema),
+  ctrl.completeProfile,
+);
+router.post(
+  "/resend-code",
+  resendCodeLimiter,
+  validate(resendCodeSchema),
+  ctrl.resendCode,
+);
+router.post(
+  "/verify-code",
+  verifyCodeLimiter,
+  validate(verifyCodeSchema),
+  ctrl.verifyCode,
+);
 // ========== RUTAS DE GOOGLE ==========
 router.get(
   "/google",
   passport.authenticate("google", {
     scope: ["profile", "email"],
-    prompt: "select_account", // ← Agrega esta línea
+    prompt: "select_account",
   }),
 );
 
@@ -50,7 +91,7 @@ router.get(
   }),
   async (req, res) => {
     try {
-      console.log("Usuario de Google:", req.user); // Debug
+      console.log("Usuario de Google:", req.user);
 
       const payload = {
         id: req.user.id,
@@ -59,7 +100,7 @@ router.get(
       };
       const { accessToken, refreshToken } = generateTokens(payload);
 
-      console.log("Tokens generados:", { accessToken, refreshToken }); // Debug
+      console.log("Tokens generados:", { accessToken, refreshToken });
 
       res.redirect(
         `http://localhost:3000/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`,

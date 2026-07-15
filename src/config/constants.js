@@ -35,3 +35,12 @@ export const PAGINATION = {
 };
 
 export const BCRYPT_ROUNDS = 12;
+
+export const EMAIL_VERIFICATION = {
+  CODE_LENGTH: 6,
+  EXPIRATION_MINUTES: 10,
+  MAX_VERIFY_ATTEMPTS: 5,
+  LOCKOUT_MINUTES: 15,
+  MAX_RESENDS_PER_HOUR: 5,
+  RESEND_COOLDOWN_SECONDS: 60, // espera entre reenvíos
+};
