@@ -16,6 +16,7 @@ import {
   resendCodeSchema,
   verifyCodeSchema,
 } from "../schemas/auth.schema.js";
+import { CLIENT_URL } from "../config/env.js";
 
 import passport from "../config/passport.js";
 import { generateTokens } from "../services/auth.service.js";
@@ -103,13 +104,12 @@ router.get(
       console.log("Tokens generados:", { accessToken, refreshToken });
 
       res.redirect(
-        `http://localhost:3000/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`,
+        `${CLIENT_URL}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`,
       );
     } catch (error) {
       console.error("Error en callback:", error);
-      res.redirect(`http://localhost:3000/login?error=google_auth_failed`);
+      res.redirect(`${CLIENT_URL}/login?error=google_auth_failed`);
     }
   },
 );
-
 export default router;
