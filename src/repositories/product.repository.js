@@ -13,6 +13,7 @@ export const getAll = async ({
   estado,
   search,
   sort,
+  atributos, // ✅ nuevo: [{ attribute_id: 5, valores: ["iPhone 12","iPhone 13"] }, ...]
 }) => {
   let where = "WHERE 1=1";
   const params = [];
@@ -92,6 +93,21 @@ export const getAll = async ({
   if (estado && estado !== "") {
     where += " AND p.estado = ?";
     params.push(estado);
+  }
+
+  // ─── ATRIBUTOS DINÁMICOS (Modelo compatible, Potencia, etc.) ─────────────
+  if (atributos && Array.isArray(atributos) && atributos.length > 0) {
+    atributos.forEach(({ attribute_id, valores }) => {
+      if (!attribute_id || !valores?.length) return;
+      const placeholders = valores.map(() => "?").join(", ");
+      where += ` AND EXISTS (
+        SELECT 1 FROM product_attributes pa
+        WHERE pa.product_id = p.id
+        AND pa.attribute_id = ?
+        AND pa.valor IN (${placeholders})
+      )`;
+      params.push(attribute_id, ...valores);
+    });
   }
 
   // ─── ORDER BY ─────────────────────────────────────────────────────────────
@@ -248,6 +264,14 @@ export const findById = async (id) => {
     [id],
   );
   product.variants = variants;
+  // ✅ NUEVO: Obtener atributos (specs/variantes catalogadas)
+  const [attributes] = await pool.query(
+    `SELECT id, atributo, valor, attribute_id
+     FROM product_attributes
+     WHERE product_id = ?`,
+    [id],
+  );
+  product.atributos = attributes;
 
   return product;
 };
@@ -301,42 +325,113 @@ export const getRelated = async (productId, categoryId, limit = 8) => {
 };
 
 // ─── OBTENER OPCIONES DE FILTRO ─────────────────────────────────────────────
-export const getFilterOptions = async () => {
-  // Marcas: solo productos activos
-  const [brands] = await pool.query(`
+export const getFilterOptions = async ({ category_id, brand_id } = {}) => {
+  // ✅ Construimos un WHERE dinámico que se reusa en las 4 queries,
+  // para que marca/talla/color/atributos reflejen solo lo que existe en el
+  // subconjunto de productos filtrado (ej. una categoría específica).
+  let extraWhere = "";
+  const extraParams = [];
+
+  if (category_id && Array.isArray(category_id) && category_id.length > 0) {
+    const placeholders = category_id.map(() => "?").join(", ");
+    extraWhere += ` AND p.category_id IN (${placeholders})`;
+    extraParams.push(...category_id);
+  } else if (category_id) {
+    extraWhere += " AND p.category_id = ?";
+    extraParams.push(category_id);
+  }
+
+  if (brand_id) {
+    extraWhere += " AND p.brand_id = ?";
+    extraParams.push(brand_id);
+  }
+
+  // Marcas: solo productos activos dentro del subconjunto filtrado
+  const [brands] = await pool.query(
+    `
     SELECT DISTINCT b.id, b.nombre
     FROM brands b
     INNER JOIN products p ON p.brand_id = b.id
-    WHERE p.estado = 'activo'
+    WHERE p.estado = 'activo' ${extraWhere}
     ORDER BY b.nombre
-  `);
+  `,
+    extraParams,
+  );
 
-  // Tallas: solo variantes activas de productos activos
-  const [tallasRaw] = await pool.query(`
+  // Tallas: solo variantes activas de productos activos, dentro del subconjunto
+  const [tallasRaw] = await pool.query(
+    `
     SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Talla')) as talla
     FROM product_variants pv
     INNER JOIN products p ON p.id = pv.product_id
     WHERE pv.activo = 1
       AND p.estado = 'activo'
       AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Talla')) IS NOT NULL
-  `);
+      AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Talla')) != ''
+      ${extraWhere}
+  `,
+    extraParams,
+  );
   const tallas = tallasRaw.map((row) => row.talla).filter(Boolean);
 
-  // Colores: solo variantes activas de productos activos
-  const [coloresRaw] = await pool.query(`
+  // Colores: solo variantes activas de productos activos, dentro del subconjunto
+  const [coloresRaw] = await pool.query(
+    `
     SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) as color
     FROM product_variants pv
     INNER JOIN products p ON p.id = pv.product_id
     WHERE pv.activo = 1
       AND p.estado = 'activo'
       AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) IS NOT NULL
-  `);
+      AND JSON_UNQUOTE(JSON_EXTRACT(pv.opciones, '$.Color')) != ''
+      ${extraWhere}
+  `,
+    extraParams,
+  );
   const colores = coloresRaw.map((row) => row.color).filter(Boolean);
+
+  // ✅ Atributos dinámicos tipo "spec" (ej. Modelo compatible, Potencia)
+  // Solo trae los que existen realmente dentro del subconjunto filtrado
+  // (ej. si category_id = Fundas, solo aparecen los specs de Fundas)
+  const [attrRows] = await pool.query(
+    `
+    SELECT DISTINCT ad.id as attribute_id, ad.nombre as attribute_nombre, pa.valor
+    FROM product_attributes pa
+    JOIN products p ON p.id = pa.product_id
+    JOIN attribute_definitions ad ON ad.id = pa.attribute_id
+    WHERE p.estado = 'activo'
+      AND ad.tipo = 'spec'
+      AND ad.filtrable = 1
+      AND pa.valor IS NOT NULL
+      AND pa.valor != ''
+      ${extraWhere}
+    ORDER BY ad.nombre, pa.valor
+  `,
+    extraParams,
+  );
+
+  // Agrupar por atributo: { "Modelo compatible": ["iPhone 12", "iPhone 13"], ... }
+  const atributosMap = {};
+  attrRows.forEach((row) => {
+    const key = row.attribute_nombre;
+    if (!atributosMap[key]) {
+      atributosMap[key] = {
+        attribute_id: row.attribute_id,
+        nombre: key,
+        valores: [],
+      };
+    }
+    if (!atributosMap[key].valores.includes(row.valor)) {
+      atributosMap[key].valores.push(row.valor);
+    }
+  });
+  const atributosDinamicos = Object.values(atributosMap);
 
   return {
     marcas: brands,
     tallas,
     colores,
+    atributos: atributosDinamicos, // ✅ nuevo
   };
 };
 

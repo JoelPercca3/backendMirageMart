@@ -53,6 +53,7 @@ export const productSchema = z.object({
       z.object({
         atributo: z.string().min(1),
         valor: z.string().min(1),
+        attribute_id: z.coerce.number().int().positive().optional().nullable(), // ✅ nuevo
       }),
     )
     .optional(),

@@ -148,6 +148,50 @@ async function expandCategoryIds(category_id) {
   return [Number(category_id), ...children.map((c) => c.id)];
 }
 
+// ─── Helper: convierte query params attr_5=val1,val2 en [{attribute_id, valores}] ──
+function parseAtributosQuery(query) {
+  const atributos = [];
+  for (const key in query) {
+    if (key.startsWith("attr_")) {
+      const attribute_id = Number(key.replace("attr_", ""));
+      const valores = query[key]
+        ? String(query[key]).split(",").filter(Boolean)
+        : [];
+      if (attribute_id && valores.length > 0) {
+        atributos.push({ attribute_id, valores });
+      }
+    }
+  }
+  return atributos;
+}
+
+// ─── Helper: valida que los atributos requeridos de la categoría estén presentes ──
+async function validarAtributosRequeridos(categoryId, atributos = []) {
+  const [requeridos] = await pool.query(
+    `SELECT ad.id, ad.nombre
+     FROM category_attributes ca
+     JOIN attribute_definitions ad ON ad.id = ca.attribute_id
+     WHERE ca.category_id = ? AND ca.es_requerido = 1`,
+    [categoryId],
+  );
+
+  if (requeridos.length === 0) return; // nada que validar
+
+  const idsIncluidos = new Set(
+    (atributos || [])
+      .filter((a) => a.attribute_id && a.valor && a.valor.trim() !== "")
+      .map((a) => a.attribute_id),
+  );
+
+  const faltantes = requeridos.filter((r) => !idsIncluidos.has(r.id));
+  if (faltantes.length > 0) {
+    throw new AppError(
+      `Faltan atributos requeridos para esta categoría: ${faltantes.map((f) => f.nombre).join(", ")}`,
+      400,
+    );
+  }
+}
+
 // ─── Service: Obtener todos los productos ────────────────────────────────────
 export const getAll = async (query) => {
   const { page, limit, offset } = getPagination(query);
@@ -176,6 +220,9 @@ export const getAll = async (query) => {
     expandedCategoryIds = await expandCategoryIds(category_id);
   }
 
+  // ✅ Parsear atributos dinámicos del query string
+  const atributos = parseAtributosQuery(query);
+
   const { rows, total } = await productRepo.getAll({
     limit,
     offset,
@@ -188,6 +235,7 @@ export const getAll = async (query) => {
     estado: estadoFilter,
     search: expandedSearch,
     sort,
+    atributos, // ✅ nuevo
   });
 
   return { data: rows, total, page, limit };
@@ -206,8 +254,19 @@ export const getFeatured = async () => {
 };
 
 // ─── Service: Opciones disponibles para los filtros ────────────────────────
-export const getFilterOptions = async () => {
-  const options = await productRepo.getFilterOptions();
+export const getFilterOptions = async (query = {}) => {
+  const { category_id, brand_id } = query;
+
+  let expandedCategoryIds = null;
+  if (category_id) {
+    expandedCategoryIds = await expandCategoryIds(category_id);
+  }
+
+  const options = await productRepo.getFilterOptions({
+    category_id: expandedCategoryIds,
+    brand_id,
+  });
+
   return {
     ...options,
     tallas: sortTallas(options.tallas),
@@ -216,6 +275,7 @@ export const getFilterOptions = async () => {
 
 // ─── Service: Búsqueda pública con sinónimos ────────────────────────────────
 export const search = async (q, query) => {
+  console.log("🔍 RAW query completo:", query);
   if (!q || q.trim().length < 2) {
     throw new AppError(
       "El término de búsqueda debe tener al menos 2 caracteres",
@@ -235,6 +295,10 @@ export const search = async (q, query) => {
     estado,
   } = query;
   const terminos = expandirTerminos(q.trim());
+
+  const atributos = parseAtributosQuery(query);
+
+  // Parsear atributos dinámicos para search también
 
   // ─── CONSTRUIR WHERE ──────────────────────────────────────────────────────
   const conditions = terminos
@@ -293,6 +357,21 @@ export const search = async (q, query) => {
     )`;
       params.push(...colores);
     }
+  }
+
+  // ─── ATRIBUTOS DINÁMICOS (Modelo compatible, Potencia, etc.) ─────────────
+  if (atributos && atributos.length > 0) {
+    atributos.forEach(({ attribute_id, valores }) => {
+      if (!attribute_id || !valores?.length) return;
+      const placeholders = valores.map(() => "?").join(", ");
+      where += ` AND EXISTS (
+        SELECT 1 FROM product_attributes pa
+        WHERE pa.product_id = p.id
+        AND pa.attribute_id = ?
+        AND pa.valor IN (${placeholders})
+      )`;
+      params.push(attribute_id, ...valores);
+    });
   }
 
   // ─── ORDER BY ────────────────────────────────────────────────────────────
@@ -377,6 +456,10 @@ export const getRelated = async (id) => {
 
 // ─── Service: Crear producto ──────────────────────────────────────────────────
 export const create = async (data) => {
+  if (data.category_id) {
+    await validarAtributosRequeridos(data.category_id, data.atributos);
+  }
+
   let slug = generateSlug(data.nombre);
   const existing = await productRepo.findBySlug(slug);
   if (existing) {
@@ -390,6 +473,11 @@ export const create = async (data) => {
 export const update = async (id, data) => {
   const product = await productRepo.findById(id);
   if (!product) throw new AppError("Producto no encontrado", 404);
+
+  const categoryToCheck = data.category_id || product.category_id;
+  if (categoryToCheck && data.atributos !== undefined) {
+    await validarAtributosRequeridos(categoryToCheck, data.atributos);
+  }
 
   if (data.nombre && data.nombre !== product.nombre) {
     let slug = generateSlug(data.nombre);

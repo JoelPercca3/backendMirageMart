@@ -13,6 +13,8 @@ import adminRoutes from "./admin.routes.js";
 import { pool } from "../config/database.js";
 import variantRoutes from "./variant.routes.js";
 import notificationRoutes from "./notification.routes.js";
+import attributeRoutes from "./attribute.routes.js";
+import bannerRoutes from "./banner.routes.js";
 
 const router = Router();
 
@@ -29,6 +31,8 @@ router.use("/uploads", uploadRoutes);
 router.use("/admin", adminRoutes);
 router.use("/admin/variants", variantRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/attributes", attributeRoutes); // quedaría /api/v1/attributes
+router.use("/banners", bannerRoutes);
 
 // ← Ruta pública para métodos de envío
 router.get("/shipping", async (req, res) => {

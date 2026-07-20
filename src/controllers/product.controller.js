@@ -14,7 +14,7 @@ export const getAll = async (req, res, next) => {
 // ✅ Opciones disponibles para el sidebar de filtros (talla, color, marca)
 export const getFilterOptions = async (req, res, next) => {
   try {
-    success(res, await productSvc.getFilterOptions());
+    success(res, await productSvc.getFilterOptions(req.query));
   } catch (e) {
     next(e);
   }
@@ -110,8 +110,13 @@ export const create = async (req, res, next) => {
         for (const attr of atributos) {
           if (attr.atributo && attr.valor) {
             await pool.query(
-              "INSERT INTO product_attributes (product_id, atributo, valor) VALUES (?, ?, ?)",
-              [product.id, attr.atributo, attr.valor],
+              "INSERT INTO product_attributes (product_id, atributo, valor, attribute_id) VALUES (?, ?, ?, ?)",
+              [
+                product.id,
+                attr.atributo,
+                attr.valor,
+                attr.attribute_id || null,
+              ],
             );
           }
         }
@@ -204,9 +209,7 @@ export const update = async (req, res, next) => {
       }
     }
 
-    // ─────────────────────────────────────────────
-    // 3. ACTUALIZAR ATRIBUTOS
-    // ─────────────────────────────────────────────
+    // ─── 3. ACTUALIZAR ATRIBUTOS ───────────────────────────────
     if (atributos && Array.isArray(atributos)) {
       await pool.query("DELETE FROM product_attributes WHERE product_id = ?", [
         productId,
@@ -215,8 +218,8 @@ export const update = async (req, res, next) => {
       for (const attr of atributos) {
         if (attr.atributo && attr.valor) {
           await pool.query(
-            `INSERT INTO product_attributes (product_id, atributo, valor) VALUES (?, ?, ?)`,
-            [productId, attr.atributo, attr.valor],
+            "INSERT INTO product_attributes (product_id, atributo, valor, attribute_id) VALUES (?, ?, ?, ?)",
+            [productId, attr.atributo, attr.valor, attr.attribute_id || null],
           );
         }
       }

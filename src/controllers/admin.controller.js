@@ -844,12 +844,23 @@ export const createBrand = async (req, res, next) => {
       });
     }
 
-    const [r] = await pool.query("INSERT INTO brands (nombre) VALUES (?)", [
-      nombre.trim(),
-    ]);
+    // ✅ Generar slug único para la marca nueva
+    let slug = generateSlug(nombre.trim());
+    const [slugExists] = await pool.query(
+      "SELECT id FROM brands WHERE slug = ?",
+      [slug],
+    );
+    if (slugExists.length > 0) {
+      slug = generateSlug(nombre.trim(), Date.now().toString().slice(-5));
+    }
+
+    const [r] = await pool.query(
+      "INSERT INTO brands (nombre, slug) VALUES (?, ?)",
+      [nombre.trim(), slug],
+    );
     res.json({
       ok: true,
-      data: { id: r.insertId, nombre: nombre.trim() },
+      data: { id: r.insertId, nombre: nombre.trim(), slug },
       message: "Marca creada",
     });
   } catch (e) {
