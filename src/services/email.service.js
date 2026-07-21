@@ -15,6 +15,8 @@ const transporter = nodemailer.createTransport({
   port: Number(MAIL_PORT),
   secure: Number(MAIL_PORT) === 465,
   auth: { user: MAIL_USER, pass: MAIL_PASS },
+  pool: true, // ← agrega esto
+  maxConnections: 5, // ← opcional, limita conexiones simultáneas
 });
 
 // ─── Función base de envío ────────────────────────────────────────────────────
