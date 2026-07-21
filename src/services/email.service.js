@@ -1,30 +1,16 @@
-import nodemailer from "nodemailer";
-import {
-  MAIL_HOST,
-  MAIL_PORT,
-  MAIL_USER,
-  MAIL_PASS,
-  MAIL_FROM,
-  CLIENT_URL,
-} from "../config/env.js";
+import { MAIL_USER, MAIL_FROM, CLIENT_URL } from "../config/env.js";
 import { escapeHTML } from "../utils/sanitize.js";
+import { Resend } from "resend";
 
-// ─── Transporter ──────────────────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: MAIL_HOST,
-  port: Number(MAIL_PORT),
-  secure: Number(MAIL_PORT) === 465,
-  auth: { user: MAIL_USER, pass: MAIL_PASS },
-  pool: true, // ← agrega esto
-  maxConnections: 5, // ← opcional, limita conexiones simultáneas
-});
+// ─── Resend Client ──────────────────────────────────────────────────────────────
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ─── Función base de envío ────────────────────────────────────────────────────
 const send = async ({ to, subject, html, attachments }) => {
   const isProd = process.env.NODE_ENV === "production";
 
-  if (!MAIL_USER || !MAIL_PASS) {
-    const msg = `[Email] Credenciales no configuradas — no se pudo enviar: ${subject}`;
+  if (!process.env.RESEND_API_KEY) {
+    const msg = `[Email] RESEND_API_KEY no configurada — no se pudo enviar: ${subject}`;
     if (isProd) {
       throw new Error(msg);
     }
@@ -33,12 +19,12 @@ const send = async ({ to, subject, html, attachments }) => {
   }
 
   try {
-    await transporter.sendMail({
-      from: MAIL_FROM,
+    await resend.emails.send({
+      from: "MirageMart <onboarding@resend.dev>", // Cambia a tu dominio verificado cuando esté listo
       to,
       subject,
       html,
-      ...(attachments?.length ? { attachments } : {}),
+      attachments: attachments?.length ? attachments : undefined,
     });
     console.log(`✅ Email enviado a ${to}: ${subject}`);
   } catch (err) {
