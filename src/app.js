@@ -23,6 +23,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+app.set("trust proxy", 1); // ← agrega esta línea aquí
+
 // ── Seguridad ─────────────────────────────────────────────
 app.use(
   helmet({
