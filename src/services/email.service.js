@@ -20,7 +20,7 @@ const send = async ({ to, subject, html, attachments }) => {
 
   try {
     await resend.emails.send({
-      from: "MirageMart <onboarding@resend.dev>", // Cambia a tu dominio verificado cuando esté listo
+      from: "MirageMart <notificaciones@mail.miragemart.pe>",
       to,
       subject,
       html,
@@ -99,7 +99,7 @@ const wrapHTML = (content, title) => `
     <div class="footer">
       <p>
         © ${new Date().getFullYear()} MirageMart — Todos los derechos reservados<br/>
-        <a href="${CLIENT_URL}">www.miragemart.com</a> &nbsp;·&nbsp;
+       <a href="${CLIENT_URL}">www.miragemart.pe</a> &nbsp;·&nbsp;
         <a href="https://wa.me/51944174400">WhatsApp</a>
       </p>
       <p style="margin-top:8px;">¿Tienes dudas? Escríbenos, estamos para ayudarte 💪</p>
